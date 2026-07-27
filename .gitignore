@@ -1,0 +1,12 @@
+build/
+__pycache__/
+*.py[cod]
+*.db
+*.sqlite
+.venv/
+.DS_Store
+
+# Guardrail: never commit real clinical text. Only fixtures/ (synthetic) belongs
+# in this repo.
+notes_real/
+phi/

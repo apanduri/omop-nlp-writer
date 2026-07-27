@@ -1,0 +1,86 @@
+{
+  "pipeline": "chart-review-platform",
+  "version": "0.3.1",
+  "model": "claude-opus-4-5",
+  "review_kind": "ner",
+  "note_id": 1002,
+  "patient_id": 2,
+  "note_datetime": "2025-04-02T14:05:00",
+  "entities": [
+    {
+      "entity_id": "1002-134-138",
+      "text": "MMSE",
+      "label": "cognitive_assessment",
+      "span": {
+        "start": 134,
+        "end": 138
+      },
+      "quote": "...al fall at home last week. Cognitive screen: MMSE 29/30 - within normal limits for education l...",
+      "assertion": "present",
+      "temporality": "current",
+      "value": "29",
+      "value_unit": null,
+      "confidence": 0.95
+    },
+    {
+      "entity_id": "1002-92-96",
+      "text": "fall",
+      "label": "event",
+      "span": {
+        "start": 92,
+        "end": 96
+      },
+      "quote": "...84, brought in by his son after a mechanical fall at home last week. Cognitive screen: MMSE 29...",
+      "assertion": "present",
+      "temporality": "history",
+      "value": null,
+      "value_unit": null,
+      "confidence": 0.89
+    },
+    {
+      "entity_id": "1002-263-278",
+      "text": "inpatient visit",
+      "label": "encounter",
+      "span": {
+        "start": 263,
+        "end": 278
+      },
+      "quote": "...tia on today's assessment. He was seen in an inpatient visit last year for pneumonia. Frailty noted; gait...",
+      "assertion": "present",
+      "temporality": "history",
+      "value": null,
+      "value_unit": null,
+      "confidence": 0.85
+    },
+    {
+      "entity_id": "1002-304-311",
+      "text": "Frailty",
+      "label": "finding",
+      "span": {
+        "start": 304,
+        "end": 311
+      },
+      "quote": "... an inpatient visit last year for pneumonia. Frailty noted; gait speed markedly reduced. ",
+      "assertion": "present",
+      "temporality": "current",
+      "value": null,
+      "value_unit": null,
+      "confidence": 0.79
+    },
+    {
+      "entity_id": "1002-319-329",
+      "text": "gait speed",
+      "label": "finding",
+      "span": {
+        "start": 319,
+        "end": 329
+      },
+      "quote": "...isit last year for pneumonia. Frailty noted; gait speed markedly reduced. ",
+      "assertion": "present",
+      "temporality": "current",
+      "value": null,
+      "value_unit": null,
+      "confidence": 0.72
+    }
+  ]
+}

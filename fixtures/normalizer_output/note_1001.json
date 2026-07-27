@@ -1,0 +1,91 @@
+{
+  "pipeline": "bso-normalizer",
+  "version": "0.2.0",
+  "mentions": [
+    {
+      "mention_id": "1001-130-134",
+      "note_id": 1001,
+      "span": {
+        "start": 130,
+        "end": 134
+      },
+      "text": "MMSE",
+      "candidates": [
+        {
+          "concept_id": 42869861,
+          "concept_name": "Mini-Mental State Examination [MMSE] Observation",
+          "vocabulary_id": "LOINC",
+          "score": 0.97
+        }
+      ]
+    },
+    {
+      "mention_id": "1001-247-255",
+      "note_id": 1001,
+      "span": {
+        "start": 247,
+        "end": 255
+      },
+      "text": "dementia",
+      "candidates": [
+        {
+          "concept_id": 4182210,
+          "concept_name": "Dementia",
+          "vocabulary_id": "SNOMED",
+          "score": 0.95
+        }
+      ]
+    },
+    {
+      "mention_id": "1001-288-293",
+      "note_id": 1001,
+      "span": {
+        "start": 288,
+        "end": 293
+      },
+      "text": "HbA1c",
+      "candidates": [
+        {
+          "concept_id": 3004410,
+          "concept_name": "Hemoglobin A1c/Hemoglobin.total in Blood",
+          "vocabulary_id": "LOINC",
+          "score": 0.99
+        }
+      ]
+    },
+    {
+      "mention_id": "1001-366-375",
+      "note_id": 1001,
+      "span": {
+        "start": 366,
+        "end": 375
+      },
+      "text": "donepezil",
+      "candidates": [
+        {
+          "concept_id": 1518254,
+          "concept_name": "Donepezil",
+          "vocabulary_id": "RxNorm",
+          "score": 0.93
+        }
+      ]
+    },
+    {
+      "mention_id": "1001-330-338",
+      "note_id": 1001,
+      "span": {
+        "start": 330,
+        "end": 338
+      },
+      "text": "delirium",
+      "candidates": [
+        {
+          "concept_id": 4182210,
+          "concept_name": "Dementia",
+          "vocabulary_id": "SNOMED",
+          "score": 0.42
+        }
+      ]
+    }
+  ]
+}

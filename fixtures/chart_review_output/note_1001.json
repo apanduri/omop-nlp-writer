@@ -1,0 +1,86 @@
+{
+  "pipeline": "chart-review-platform",
+  "version": "0.3.1",
+  "model": "claude-opus-4-5",
+  "review_kind": "ner",
+  "note_id": 1001,
+  "patient_id": 1,
+  "note_datetime": "2025-03-14T09:20:00",
+  "entities": [
+    {
+      "entity_id": "1001-130-134",
+      "text": "MMSE",
+      "label": "cognitive_assessment",
+      "span": {
+        "start": 130,
+        "end": 134
+      },
+      "quote": "... memory clinic with her daughter. Cognition: MMSE 22/30 today, down from 26 eighteen months ag...",
+      "assertion": "present",
+      "temporality": "current",
+      "value": "22",
+      "value_unit": null,
+      "confidence": 0.94
+    },
+    {
+      "entity_id": "1001-247-255",
+      "text": "dementia",
+      "label": "diagnosis",
+      "span": {
+        "start": 247,
+        "end": 255
+      },
+      "quote": "...ed. Assessment: findings are consistent with dementia, likely Alzheimer's type. Labs: HbA1c 7.8 % ...",
+      "assertion": "present",
+      "temporality": "current",
+      "value": null,
+      "value_unit": null,
+      "confidence": 0.91
+    },
+    {
+      "entity_id": "1001-288-293",
+      "text": "HbA1c",
+      "label": "lab",
+      "span": {
+        "start": 288,
+        "end": 293
+      },
+      "quote": "...ith dementia, likely Alzheimer's type. Labs: HbA1c 7.8 % (up from 7.1). No evidence of delirium...",
+      "assertion": "present",
+      "temporality": "current",
+      "value": "7.8",
+      "value_unit": "%",
+      "confidence": 0.98
+    },
+    {
+      "entity_id": "1001-366-375",
+      "text": "donepezil",
+      "label": "medication",
+      "span": {
+        "start": 366,
+        "end": 375
+      },
+      "quote": "...dence of delirium at this visit. Plan: start donepezil 5 mg nightly, recheck in 3 months. ",
+      "assertion": "planned",
+      "temporality": "current",
+      "value": null,
+      "value_unit": null,
+      "confidence": 0.96
+    },
+    {
+      "entity_id": "1001-330-338",
+      "text": "delirium",
+      "label": "diagnosis",
+      "span": {
+        "start": 330,
+        "end": 338
+      },
+      "quote": "...s: HbA1c 7.8 % (up from 7.1). No evidence of delirium at this visit. Plan: start donepezil 5 mg ni...",
+      "assertion": "absent",
+      "temporality": "current",
+      "value": null,
+      "value_unit": null,
+      "confidence": 0.88
+    }
+  ]
+}

@@ -1,0 +1,84 @@
+{
+  "pipeline": "bso-normalizer",
+  "version": "0.2.0",
+  "mentions": [
+    {
+      "mention_id": "1002-134-138",
+      "note_id": 1002,
+      "span": {
+        "start": 134,
+        "end": 138
+      },
+      "text": "MMSE",
+      "candidates": [
+        {
+          "concept_id": 42869861,
+          "concept_name": "Mini-Mental State Examination [MMSE] Observation",
+          "vocabulary_id": "LOINC",
+          "score": 0.97
+        }
+      ]
+    },
+    {
+      "mention_id": "1002-92-96",
+      "note_id": 1002,
+      "span": {
+        "start": 92,
+        "end": 96
+      },
+      "text": "fall",
+      "candidates": [
+        {
+          "concept_id": 4022331,
+          "concept_name": "Fall",
+          "vocabulary_id": "SNOMED",
+          "score": 0.9
+        }
+      ]
+    },
+    {
+      "mention_id": "1002-263-278",
+      "note_id": 1002,
+      "span": {
+        "start": 263,
+        "end": 278
+      },
+      "text": "inpatient visit",
+      "candidates": [
+        {
+          "concept_id": 9201,
+          "concept_name": "Inpatient Visit",
+          "vocabulary_id": "Visit",
+          "score": 0.88
+        }
+      ]
+    },
+    {
+      "mention_id": "1002-304-311",
+      "note_id": 1002,
+      "span": {
+        "start": 304,
+        "end": 311
+      },
+      "text": "Frailty",
+      "candidates": []
+    },
+    {
+      "mention_id": "1002-319-329",
+      "note_id": 1002,
+      "span": {
+        "start": 319,
+        "end": 329
+      },
+      "text": "gait speed",
+      "candidates": [
+        {
+          "concept_id": 4022331,
+          "concept_name": "Fall",
+          "vocabulary_id": "SNOMED",
+          "score": 0.31
+        }
+      ]
+    }
+  ]
+}
