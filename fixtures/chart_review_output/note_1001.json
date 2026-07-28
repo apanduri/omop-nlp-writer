@@ -18,6 +18,7 @@
       "quote": "... memory clinic with her daughter. Cognition: MMSE 22/30 today, down from 26 eighteen months ag...",
       "assertion": "present",
       "temporality": "current",
+      "source": "note",
       "value": "22",
       "value_unit": null,
       "confidence": 0.94
@@ -33,6 +34,7 @@
       "quote": "...ed. Assessment: findings are consistent with dementia, likely Alzheimer's type. Labs: HbA1c 7.8 % ...",
       "assertion": "present",
       "temporality": "current",
+      "source": "note",
       "value": null,
       "value_unit": null,
       "confidence": 0.91
@@ -48,6 +50,7 @@
       "quote": "...ith dementia, likely Alzheimer's type. Labs: HbA1c 7.8 % (up from 7.1). No evidence of delirium...",
       "assertion": "present",
       "temporality": "current",
+      "source": "note",
       "value": "7.8",
       "value_unit": "%",
       "confidence": 0.98
@@ -63,6 +66,7 @@
       "quote": "...dence of delirium at this visit. Plan: start donepezil 5 mg nightly, recheck in 3 months. ",
       "assertion": "planned",
       "temporality": "current",
+      "source": "note",
       "value": null,
       "value_unit": null,
       "confidence": 0.96
@@ -78,6 +82,7 @@
       "quote": "...s: HbA1c 7.8 % (up from 7.1). No evidence of delirium at this visit. Plan: start donepezil 5 mg ni...",
       "assertion": "absent",
       "temporality": "current",
+      "source": "note",
       "value": null,
       "value_unit": null,
       "confidence": 0.88

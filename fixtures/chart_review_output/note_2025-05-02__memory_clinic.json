@@ -1,0 +1,27 @@
+{
+  "pipeline": "chart-review-platform",
+  "version": "0.3.1",
+  "model": "claude-opus-4-5",
+  "review_kind": "ner",
+  "note_id": "2025-05-02__memory_clinic",
+  "patient_id": 1,
+  "note_datetime": "2025-05-02T11:00:00",
+  "entities": [
+    {
+      "entity_id": "2025-05-02__memory_clinic-112-116",
+      "text": "MMSE",
+      "label": "cognitive_assessment",
+      "span": {
+        "start": 112,
+        "end": 116
+      },
+      "quote": "...rts she is tolerating donepezil well. Repeat MMSE 21/30 - broadly unchanged since March. ",
+      "assertion": "present",
+      "temporality": "current",
+      "source": "note",
+      "value": "21",
+      "value_unit": null,
+      "confidence": 0.93
+    }
+  ]
+}

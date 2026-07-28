@@ -79,6 +79,23 @@
           "score": 0.31
         }
       ]
+    },
+    {
+      "mention_id": "1002-293-302",
+      "note_id": 1002,
+      "span": {
+        "start": 293,
+        "end": 302
+      },
+      "text": "pneumonia",
+      "candidates": [
+        {
+          "concept_id": 4182210,
+          "concept_name": "Dementia",
+          "vocabulary_id": "SNOMED",
+          "score": 0.99
+        }
+      ]
     }
   ]
 }

@@ -249,6 +249,10 @@ LEDGER_DDL = """
 CREATE TABLE IF NOT EXISTS nlp_record_ledger (
     record_id        TEXT PRIMARY KEY,
     note_id          INTEGER NOT NULL,
+    -- The upstream note identifier as received (often a string like
+    -- "2024-12-04__pathology_report").  Kept so a load can be traced back to the
+    -- producer's own id space, not just the CDM key it resolved to.
+    source_note_id   TEXT,
     span_offset      TEXT,
     lexical_variant  TEXT,
     concept_id       INTEGER,

@@ -1,0 +1,23 @@
+{
+  "pipeline": "bso-normalizer",
+  "version": "0.2.0",
+  "mentions": [
+    {
+      "mention_id": "2025-05-02__memory_clinic-112-116",
+      "note_id": "2025-05-02__memory_clinic",
+      "span": {
+        "start": 112,
+        "end": 116
+      },
+      "text": "MMSE",
+      "candidates": [
+        {
+          "concept_id": 42869861,
+          "concept_name": "Mini-Mental State Examination [MMSE] Observation",
+          "vocabulary_id": "LOINC",
+          "score": 0.97
+        }
+      ]
+    }
+  ]
+}

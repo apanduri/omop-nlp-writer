@@ -95,6 +95,7 @@ def records_to_json(records: list[ExtractionRecord]) -> list[dict[str, Any]]:
                 "term_modifiers": r.term_modifiers,
                 "concept_id": r.concept_id,
                 "concept_confidence": r.concept_confidence,
+                "evidence_source": r.evidence_source,
                 "value": {
                     "as_number": r.value.as_number,
                     "as_string": r.value.as_string,

@@ -76,8 +76,13 @@ class Value:
 @dataclass(slots=True)
 class ExtractionRecord:
     record_id: str
-    note_id: int
-    person_id: int
+    # int  -> a CDM surrogate key, used directly.
+    # str  -> an upstream identifier, resolved via NOTE.note_source_value /
+    #         PERSON.person_source_value.  The chart-review platform emits string
+    #         note ids like "2024-12-04__pathology_report", so both are accepted.
+    #         Types are honoured as given: "1001" is a source value, 1001 is a key.
+    note_id: int | str
+    person_id: int | str
     span: Span
     lexical_variant: str
     source: Source
@@ -91,6 +96,10 @@ class ExtractionRecord:
     concept_confidence: float | None = None
     value: Value = field(default_factory=Value)
     start_date: str | None = None
+    # Where the fact came from.  "note" is the only insertable source: an "omop"
+    # evidence entry cites a structured row the extractor *read*, so writing it
+    # back would re-insert existing EHR data as NLP-derived.
+    evidence_source: str | None = None
 
     # ---------------------------------------------------------------- parsing
 
@@ -143,8 +152,8 @@ class ExtractionRecord:
 
         return cls(
             record_id=str(data["record_id"]),
-            note_id=int(data["note_id"]),
-            person_id=int(data["person_id"]),
+            note_id=_reference(data["note_id"], data["record_id"], "note_id"),
+            person_id=_reference(data["person_id"], data["record_id"], "person_id"),
             span=Span(int(span_raw["start"]), int(span_raw["end"])),
             lexical_variant=str(data["lexical_variant"]),
             source=src,
@@ -165,7 +174,18 @@ class ExtractionRecord:
                 operator_concept_id=val_raw.get("operator_concept_id"),
             ),
             start_date=data.get("start_date"),
+            evidence_source=data.get("evidence_source"),
         )
+
+    @property
+    def is_note_derived(self) -> bool:
+        """Only note-derived facts may enter the CDM.
+
+        An unset evidence_source is treated as note-derived: every current
+        producer is an NLP pipeline over note text, and the field exists to catch
+        the specific case of rubric evidence citing a structured OMOP row.
+        """
+        return self.evidence_source is None or self.evidence_source == "note"
 
     @property
     def is_normalized(self) -> bool:
@@ -186,6 +206,20 @@ class ExtractionRecord:
         raise ContractError(
             f"{self.record_id}: needs start_date or note_datetime to date the domain row"
         )
+
+
+def _reference(value: object, record_id: object, field_name: str) -> int | str:
+    """Keep an id's declared type: int means CDM key, str means source value."""
+    if isinstance(value, bool):
+        raise ContractError(f"{record_id}: {field_name} must be an int or string")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    raise ContractError(
+        f"{record_id}: {field_name} must be an int (CDM key) or a non-empty string "
+        f"(source value), got {value!r}"
+    )
 
 
 def load_records(path: Path) -> list[ExtractionRecord]:

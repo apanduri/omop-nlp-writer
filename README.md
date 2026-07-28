@@ -92,9 +92,24 @@ lands in NOTE_NLP as evidence, with the reason reported:
 | `concept_not_in_vocabulary` | Refuses to guess a domain |
 | `below_confidence_threshold` | `--min-confidence` gate |
 | `domain_not_routed` | e.g. Visit — writing it would corrupt visit accounting |
-| `note_not_found` | `NOTE_NLP.note_id` is a FK; the ID-crosswalk failure mode |
+| `note_not_found` | `NOTE_NLP.note_id` is a FK; the note must be loaded first |
 | `person_mismatch` | Record's person disagrees with the note's person |
 | `already_loaded` | Idempotency, via the ledger |
+| `evidence_source_is_not_a_note` | Cites a structured CDM row, not a note — skipped entirely |
+
+**Note ids are crosswalked, not assumed.** The upstream platform emits string note
+ids (`"2024-12-04__pathology_report"`); `NOTE.note_id` is an integer. An `int`
+`note_id` is used as a CDM key; a `string` is resolved via
+`NOTE.note_source_value`, which is the CDM's own slot for the source system's
+identifier — so no side table is needed. Same for `person_source_value`. Types are
+honoured as given, so `"1001"` is a source value and `1001` is a key. The ledger
+records both, so a load can be traced back to the producer's id space.
+
+**Facts read out of the CDM are never written back.** Rubric-style evidence can
+carry `"source": "omop"` with a table and row id, citing a structured row the
+extractor *read* rather than something found in a note. Those are refused
+outright — not even a NOTE_NLP row — because re-inserting them would duplicate
+existing EHR data under an NLP provenance flag.
 
 **Re-runs are no-ops.** `nlp_record_ledger` maps each `record_id` to the rows it
 produced. That gives idempotency *and* makes `unload` possible — an NLP load is

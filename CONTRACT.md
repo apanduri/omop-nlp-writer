@@ -24,8 +24,23 @@ One `ExtractionRecord` = **one mention of one concept in one note**.
   },
 
   // --- where in the record ---------------------------------------------------
-  "note_id":   1001,          // FK -> NOTE.note_id  (MUST already exist)
-  "person_id": 1,             // FK -> PERSON.person_id
+  // An INT is used as a CDM surrogate key directly.
+  // A STRING is treated as the upstream identifier and resolved via
+  //   NOTE.note_source_value / PERSON.person_source_value.
+  // The chart-review platform emits string note ids, so both are accepted:
+  //   "note_id": "2024-12-04__pathology_report"   -> resolved via source value
+  //   "note_id": 1001                             -> used as the key
+  // Types are honoured as given: "1001" is a source value, 1001 is a key.
+  // Either way the note must already exist in NOTE.
+  "note_id":   1001,
+  "person_id": 1,
+
+  // Where the fact came from. "note" (or omitted) is the only insertable value.
+  // Rubric-answer evidence can carry {"source": "omop", "table": ..., "row_id": ...},
+  // which cites a structured row the extractor READ. Re-inserting those would
+  // duplicate existing EHR data as NLP-derived, so the writer refuses them
+  // outright — not even a NOTE_NLP row, because it was never in a note.
+  "evidence_source": "note",
   "note_datetime": "2025-03-14T09:20:00",
   "span":    { "start": 412, "end": 416 },   // char offsets into NOTE.note_text
   "lexical_variant": "MMSE",                 // the surface text as written
@@ -61,18 +76,29 @@ One `ExtractionRecord` = **one mention of one concept in one note**.
 vocabulary. Accepting it as an input would create a second source of truth that
 would silently drift from the vocabulary the query-generation side uses.
 
-## Open questions for Yuhang / Xuguang
+## Settled
 
-1. **`note_id` identity.** NOTE_NLP.note_id is a FK into NOTE. Do the notes the
-   chart-review pipeline reads already live in a CDM NOTE table, or do they need
-   loading + an ID crosswalk? This is the likeliest source of integration pain.
-2. **Join key between the two pipelines.** This contract assumes
-   `(note_id, span.start, span.end)` is what links a chart-review mention to its
-   normalizer output. If the normalizer works off bare strings with no offsets,
-   the join is ambiguous whenever a term appears twice in one note.
-3. **Normalizer output shape.** One `concept_id`, or ranked candidates with
-   scores? If ranked, we need an agreed confidence floor below which a mention
-   is written to NOTE_NLP but *not* to a domain table.
-4. **Values.** Does the NER stage emit the numeric value ("22") as a separate
-   field, or only as part of the matched text? The writer needs it separated.
-5. **Units.** `unit_concept_id` must itself be normalized. Who owns that?
+- **Note identity.** Confirmed to need a crosswalk: the platform's note ids are
+  strings (`"2024-12-04__pathology_report"`) and `NOTE.note_id` is an integer.
+  Handled — `note_source_value` is the crosswalk, and `init-cdm` populates it.
+- **Join key.** Moot. The NER SDK is vendored inside the chart-review platform, so
+  each `MentionRecord` already carries `note_id`, `person_id`, `start`/`end`,
+  `text` and `concept_name` together. No cross-pipeline join is needed.
+- **Structured-source evidence.** Rubric evidence carrying `"source": "omop"`
+  cites a row read out of the CDM. Refused outright, so existing EHR data is
+  never re-inserted as NLP-derived.
+
+## Still open
+
+1. **BSO-AD → OMOP mapping.** The vendored NER SDK normalizes to the BSO-AD
+   ontology — `ontology/concepts.json` holds ~550 custom ids and labels with no
+   OMOP, SNOMED, LOINC or RxNorm codes. So `concept_id` cannot currently be
+   populated at all. Needs either an OMOP code per BSO-AD concept, or a curated
+   crosswalk file. Blocking for anything beyond synthetic runs.
+2. **Numeric values.** BSO-AD explicitly excludes lab values and assessments, and
+   rubric answers are boolean/categorical. Nothing observed so far emits the
+   `(concept, numeric value)` pair the MMSE = 22 example needs.
+3. **Units.** `unit_concept_id` must itself be normalized. Currently kept as
+   `unit_source_value` only, unmapped and visible rather than guessed.
+4. **Assertion policy.** Whether `planned` mentions ("start donepezil") should
+   become clinical facts. Currently yes; one dict flips it.

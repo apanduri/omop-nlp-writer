@@ -40,6 +40,8 @@ class Reason(str, Enum):
     ALREADY_LOADED = "already_loaded"
     NOTE_NOT_FOUND = "note_not_found"
     PERSON_MISMATCH = "person_mismatch"
+    NOT_NOTE_DERIVED = "evidence_source_is_not_a_note"
+    PERSON_NOT_FOUND = "person_not_found"
     NEGATED = "term_exists=false"
     UNMAPPED = "no_concept_id"
     CONCEPT_NOT_IN_VOCAB = "concept_not_in_vocabulary"
@@ -56,6 +58,8 @@ class PlannedWrite:
     detail: str | None = None
     domain_id: str | None = None
     concept_name: str | None = None
+    resolved_note_id: int | None = None
+    resolved_person_id: int | None = None
     note_nlp_id: int | None = None
     note_nlp_row: dict[str, Any] | None = None
     target: DomainTarget | None = None
@@ -125,33 +129,55 @@ class CdmNlpWriter:
         if self._already_loaded(record.record_id):
             return PlannedWrite(record, Disposition.SKIPPED, Reason.ALREADY_LOADED)
 
-        note = self.conn.execute(
-            "SELECT note_id, person_id, note_date FROM note WHERE note_id = ?",
-            (record.note_id,),
-        ).fetchone()
+        # Guard first: a fact the extractor read out of the CDM must never be
+        # written back in as NLP-derived.  That would double-count existing EHR
+        # data and defeat the provenance separation entirely.
+        if not record.is_note_derived:
+            return PlannedWrite(
+                record,
+                Disposition.SKIPPED,
+                Reason.NOT_NOTE_DERIVED,
+                detail=(
+                    f"evidence_source={record.evidence_source!r} — this cites a row the "
+                    f"extractor read from the CDM, not a fact found in a note; "
+                    f"re-inserting it would duplicate structured EHR data"
+                ),
+            )
+
+        note = self._lookup_note(record.note_id)
         if note is None:
             return PlannedWrite(
                 record,
                 Disposition.SKIPPED,
                 Reason.NOTE_NOT_FOUND,
+                detail=self._note_not_found_detail(record.note_id),
+            )
+        resolved_note_id = int(note["note_id"])
+
+        resolved_person_id = self._resolve_person(record.person_id)
+        if resolved_person_id is None:
+            return PlannedWrite(
+                record,
+                Disposition.SKIPPED,
+                Reason.PERSON_NOT_FOUND,
                 detail=(
-                    f"note_id {record.note_id} is not in NOTE — load the note first "
-                    f"(NOTE_NLP.note_id is a foreign key)"
+                    f"person_source_value {record.person_id!r} is not in PERSON — "
+                    f"the person crosswalk is missing this patient"
                 ),
             )
-        if int(note["person_id"]) != record.person_id:
+        if int(note["person_id"]) != resolved_person_id:
             return PlannedWrite(
                 record,
                 Disposition.SKIPPED,
                 Reason.PERSON_MISMATCH,
                 detail=(
-                    f"record says person {record.person_id}, "
-                    f"NOTE {record.note_id} belongs to person {note['person_id']}"
+                    f"record says person {record.person_id} (-> {resolved_person_id}), "
+                    f"NOTE {resolved_note_id} belongs to person {note['person_id']}"
                 ),
             )
 
         note_nlp_id = self._allocate("note_nlp", "note_nlp_id")
-        note_nlp_row = self._build_note_nlp_row(record, note_nlp_id)
+        note_nlp_row = self._build_note_nlp_row(record, note_nlp_id, resolved_note_id)
 
         # --- decide whether a domain row is also warranted --------------------
         concept = self.vocab.find(record.concept_id) if record.is_normalized else None
@@ -166,6 +192,8 @@ class CdmNlpWriter:
                 detail=detail,
                 domain_id=domain_id,
                 concept_name=concept_name,
+                resolved_note_id=resolved_note_id,
+                resolved_person_id=resolved_person_id,
                 note_nlp_id=note_nlp_id,
                 note_nlp_row=note_nlp_row,
             )
@@ -210,20 +238,63 @@ class CdmNlpWriter:
             Reason.OK,
             domain_id=domain_id,
             concept_name=concept_name,
+            resolved_note_id=resolved_note_id,
+            resolved_person_id=resolved_person_id,
             note_nlp_id=note_nlp_id,
             note_nlp_row=note_nlp_row,
             target=target,
             domain_row_id=domain_row_id,
-            domain_row=self._build_domain_row(record, target, domain_row_id),
+            domain_row=self._build_domain_row(
+                record, target, domain_row_id, resolved_person_id
+            ),
+        )
+
+    # ------------------------------------------------------- id resolution
+
+    def _lookup_note(self, note_ref: int | str):
+        """int -> NOTE.note_id; str -> NOTE.note_source_value.
+
+        note_source_value is the CDM's own slot for the source system's note
+        identifier, which makes it the right crosswalk for string ids like
+        "2024-12-04__pathology_report" — no side table needed.
+        """
+        if isinstance(note_ref, int):
+            return self.conn.execute(
+                "SELECT note_id, person_id FROM note WHERE note_id = ?", (note_ref,)
+            ).fetchone()
+        return self.conn.execute(
+            "SELECT note_id, person_id FROM note WHERE note_source_value = ?", (note_ref,)
+        ).fetchone()
+
+    def _resolve_person(self, person_ref: int | str) -> int | None:
+        if isinstance(person_ref, int):
+            return person_ref
+        row = self.conn.execute(
+            "SELECT person_id FROM person WHERE person_source_value = ?", (person_ref,)
+        ).fetchone()
+        return int(row["person_id"]) if row else None
+
+    def _note_not_found_detail(self, note_ref: int | str) -> str:
+        if isinstance(note_ref, int):
+            return (
+                f"note_id {note_ref} is not in NOTE — load the note first "
+                f"(NOTE_NLP.note_id is a foreign key)"
+            )
+        return (
+            f"no NOTE has note_source_value {note_ref!r} — the note must be loaded "
+            f"into the CDM before its extractions can be, and its source id recorded "
+            f"in note_source_value"
         )
 
     # ---------------------------------------------------------------- builders
 
-    def _build_note_nlp_row(self, record: ExtractionRecord, note_nlp_id: int) -> dict[str, Any]:
+    def _build_note_nlp_row(
+        self, record: ExtractionRecord, note_nlp_id: int, resolved_note_id: int
+    ) -> dict[str, Any]:
         nlp_dt = _now_iso()
         return {
             "note_nlp_id": note_nlp_id,
-            "note_id": record.note_id,
+            "note_id": resolved_note_id,
             "section_concept_id": record.section_concept_id,
             "snippet": record.snippet,
             "offset": record.span.omop_offset,
@@ -242,12 +313,16 @@ class CdmNlpWriter:
         }
 
     def _build_domain_row(
-        self, record: ExtractionRecord, target: DomainTarget, row_id: int
+        self,
+        record: ExtractionRecord,
+        target: DomainTarget,
+        row_id: int,
+        resolved_person_id: int,
     ) -> dict[str, Any]:
         event_date = record.event_date
         row: dict[str, Any] = {
             target.pk: row_id,
-            "person_id": record.person_id,
+            "person_id": resolved_person_id,
             target.concept_column: record.concept_id,
             target.start_date_column: event_date,
             # The provenance flag: this is what keeps NLP-derived rows
@@ -300,7 +375,8 @@ class CdmNlpWriter:
                     "nlp_record_ledger",
                     {
                         "record_id": planned.record.record_id,
-                        "note_id": planned.record.note_id,
+                        "note_id": planned.resolved_note_id,
+                        "source_note_id": str(planned.record.note_id),
                         "span_offset": planned.record.span.omop_offset,
                         "lexical_variant": planned.record.lexical_variant,
                         "concept_id": planned.record.concept_id,

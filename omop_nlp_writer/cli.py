@@ -67,13 +67,25 @@ def cmd_init_cdm(args: argparse.Namespace) -> int:
     doc = json.loads(args.notes.read_text())
     persons, notes = doc.get("persons", []), doc.get("notes", [])
 
-    for p in persons:
+    # Upstream ids may be strings ("2024-12-04__pathology_report", "SYNTH-001").
+    # CDM surrogate keys are integers, so we allocate one per source id and record
+    # the original in *_source_value — that column IS the crosswalk.
+    person_keys: dict[object, int] = {}
+    for i, p in enumerate(persons, start=1):
+        raw = p["person_id"]
+        key = raw if isinstance(raw, int) else i
+        person_keys[raw] = key
         conn.execute(
             """INSERT OR REPLACE INTO person
                (person_id, gender_concept_id, year_of_birth, race_concept_id,
                 ethnicity_concept_id, person_source_value)
                VALUES (?, ?, ?, 0, 0, ?)""",
-            (p["person_id"], p["gender_concept_id"], p["year_of_birth"], p.get("person_source_value")),
+            (
+                key,
+                p["gender_concept_id"],
+                p["year_of_birth"],
+                p.get("person_source_value") or str(raw),
+            ),
         )
         # An observation period is required for OHDSI cohort SQL to find anyone.
         conn.execute(
@@ -84,7 +96,16 @@ def cmd_init_cdm(args: argparse.Namespace) -> int:
             (p["person_id"], p["person_id"], "2015-01-01", "2026-12-31", EHR_TYPE_CONCEPT_ID),
         )
 
+    next_note_key = 1
+    crosswalked = 0
     for n in notes:
+        raw = n["note_id"]
+        if isinstance(raw, int):
+            note_key = raw
+        else:
+            note_key = next_note_key
+            next_note_key += 1
+            crosswalked += 1
         conn.execute(
             """INSERT OR REPLACE INTO note
                (note_id, person_id, note_date, note_datetime, note_type_concept_id,
@@ -92,22 +113,24 @@ def cmd_init_cdm(args: argparse.Namespace) -> int:
                 language_concept_id, note_source_value)
                VALUES (?, ?, ?, ?, ?, 0, ?, ?, 0, 0, ?)""",
             (
-                n["note_id"],
-                n["person_id"],
+                note_key,
+                person_keys.get(n["person_id"], n["person_id"]),
                 n["note_date"],
                 n.get("note_datetime"),
                 EHR_TYPE_CONCEPT_ID,
                 n.get("note_title"),
                 n.get("note_text"),
-                f"SYNTHETIC-{n['note_id']}",
+                # The crosswalk: extractions arriving with the upstream string id
+                # resolve through this column.
+                str(raw),
             ),
         )
     conn.commit()
     conn.close()
     print(f"[cdm] loaded {len(persons)} persons, {len(notes)} notes from {args.notes}")
-    print("[cdm] note: NOTE_NLP.note_id is a FK into NOTE — extractions for any other")
-    print("      note_id will be skipped by `load`, which is the ID-crosswalk problem")
-    print("      we need to settle with Yuhang.")
+    if crosswalked:
+        print(f"[cdm] {crosswalked} note(s) had non-integer source ids — allocated CDM")
+        print("      keys and recorded the originals in NOTE.note_source_value")
     return 0
 
 
@@ -231,7 +254,10 @@ def _print_report(report: LoadReport, *, dry_run: bool) -> None:
             Disposition.NOTE_NLP_ONLY: "NLP ",
             Disposition.SKIPPED: "SKIP",
         }[planned.disposition]
-        head = f"{icon} note {r.note_id} @{r.span.omop_offset:<10} {r.lexical_variant!r}"
+        note_ref = str(r.note_id)
+        if planned.resolved_note_id is not None and not isinstance(r.note_id, int):
+            note_ref += f" -> NOTE#{planned.resolved_note_id}"
+        head = f"{icon} note {note_ref} @{r.span.omop_offset:<10} {r.lexical_variant!r}"
         print(f"\n{head}")
         if planned.disposition is Disposition.SKIPPED:
             print(f"      skipped: {planned.reason.value}"

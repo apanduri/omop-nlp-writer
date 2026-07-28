@@ -18,6 +18,7 @@
       "quote": "...al fall at home last week. Cognitive screen: MMSE 29/30 - within normal limits for education l...",
       "assertion": "present",
       "temporality": "current",
+      "source": "note",
       "value": "29",
       "value_unit": null,
       "confidence": 0.95
@@ -33,6 +34,7 @@
       "quote": "...84, brought in by his son after a mechanical fall at home last week. Cognitive screen: MMSE 29...",
       "assertion": "present",
       "temporality": "history",
+      "source": "note",
       "value": null,
       "value_unit": null,
       "confidence": 0.89
@@ -48,6 +50,7 @@
       "quote": "...tia on today's assessment. He was seen in an inpatient visit last year for pneumonia. Frailty noted; gait...",
       "assertion": "present",
       "temporality": "history",
+      "source": "note",
       "value": null,
       "value_unit": null,
       "confidence": 0.85
@@ -63,6 +66,7 @@
       "quote": "... an inpatient visit last year for pneumonia. Frailty noted; gait speed markedly reduced. ",
       "assertion": "present",
       "temporality": "current",
+      "source": "note",
       "value": null,
       "value_unit": null,
       "confidence": 0.79
@@ -78,9 +82,26 @@
       "quote": "...isit last year for pneumonia. Frailty noted; gait speed markedly reduced. ",
       "assertion": "present",
       "temporality": "current",
+      "source": "note",
       "value": null,
       "value_unit": null,
       "confidence": 0.72
+    },
+    {
+      "entity_id": "1002-293-302",
+      "text": "pneumonia",
+      "label": "diagnosis",
+      "span": {
+        "start": 293,
+        "end": 302
+      },
+      "quote": "...was seen in an inpatient visit last year for pneumonia. Frailty noted; gait speed markedly reduced....",
+      "assertion": "present",
+      "temporality": "history",
+      "source": "omop",
+      "value": null,
+      "value_unit": null,
+      "confidence": 0.99
     }
   ]
 }

@@ -66,6 +66,22 @@ NOTES = [
             "Frailty noted; gait speed markedly reduced.\n"
         ),
     },
+    {
+        # Deliberately a STRING id, matching the chart-review platform's real
+        # shape ("2024-12-04__pathology_report").  init-cdm allocates a CDM
+        # integer key and records this in NOTE.note_source_value; extractions
+        # arriving with the string resolve through that column.
+        "note_id": "2025-05-02__memory_clinic",
+        "person_id": 1,
+        "note_date": "2025-05-02",
+        "note_datetime": "2025-05-02T11:00:00",
+        "note_title": "Memory clinic interim",
+        "note_text": (
+            "SYNTHETIC NOTE - NOT REAL PATIENT DATA.\n"
+            "Interim call. Daughter reports she is tolerating donepezil well.\n"
+            "Repeat MMSE 21/30 - broadly unchanged since March.\n"
+        ),
+    },
 ]
 
 # --------------------------------------------------------------------------
@@ -221,6 +237,39 @@ MENTIONS = [
         "vocabulary_id": "SNOMED",
         "norm_score": 0.31,
     },
+    {
+        # Evidence read out of the CDM, not found in a note.  Rubric answers can
+        # cite structured rows this way; re-inserting them would double-count
+        # existing EHR data, so the writer must refuse it outright.
+        "note_id": 1002,
+        "term": "pneumonia",
+        "label": "diagnosis",
+        "value": None,
+        "value_unit": None,
+        "assertion": "present",
+        "temporal": "history",
+        "ner_confidence": 0.99,
+        "evidence_source": "omop",
+        "concept_id": 4182210,
+        "concept_name": "Dementia",
+        "vocabulary_id": "SNOMED",
+        "norm_score": 0.99,
+    },
+    # --- note "2025-05-02__memory_clinic": the string-note-id crosswalk -------
+    {
+        "note_id": "2025-05-02__memory_clinic",
+        "term": "MMSE",
+        "label": "cognitive_assessment",
+        "value": "21",
+        "value_unit": None,
+        "assertion": "present",
+        "temporal": "current",
+        "ner_confidence": 0.93,
+        "concept_id": 42869861,
+        "concept_name": "Mini-Mental State Examination [MMSE] Observation",
+        "vocabulary_id": "LOINC",
+        "norm_score": 0.97,
+    },
 ]
 
 
@@ -267,6 +316,7 @@ def main() -> int:
                     "quote": snippet_around(text, start, end),
                     "assertion": mention["assertion"],
                     "temporality": mention["temporal"],
+                    "source": mention.get("evidence_source", "note"),
                     "value": mention["value"],
                     "value_unit": mention["value_unit"],
                     "confidence": mention["ner_confidence"],

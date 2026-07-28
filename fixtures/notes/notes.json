@@ -29,6 +29,14 @@
       "note_datetime": "2025-04-02T14:05:00",
       "note_title": "Geriatrics intake",
       "note_text": "SYNTHETIC NOTE - NOT REAL PATIENT DATA.\nMr. B, 84, brought in by his son after a mechanical fall at home last week.\nCognitive screen: MMSE 29/30 - within normal limits for education level.\nThere is no evidence of dementia on today's assessment.\nHe was seen in an inpatient visit last year for pneumonia.\nFrailty noted; gait speed markedly reduced.\n"
+    },
+    {
+      "note_id": "2025-05-02__memory_clinic",
+      "person_id": 1,
+      "note_date": "2025-05-02",
+      "note_datetime": "2025-05-02T11:00:00",
+      "note_title": "Memory clinic interim",
+      "note_text": "SYNTHETIC NOTE - NOT REAL PATIENT DATA.\nInterim call. Daughter reports she is tolerating donepezil well.\nRepeat MMSE 21/30 - broadly unchanged since March.\n"
     }
   ]
 }

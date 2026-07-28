@@ -49,24 +49,16 @@ class WriterTestBase(unittest.TestCase):
         self.vocab_path = tmp / "vocab.db"
         build_from_csv(FIXTURES / "vocab_mini.csv", self.vocab_path)
 
-        conn = connect(self.cdm_path, create=True)
-        init_schema(conn)
-        notes = json.loads((FIXTURES / "notes" / "notes.json").read_text())
-        for p in notes["persons"]:
-            conn.execute(
-                "INSERT INTO person (person_id, gender_concept_id, year_of_birth,"
-                " race_concept_id, ethnicity_concept_id) VALUES (?,?,?,0,0)",
-                (p["person_id"], p["gender_concept_id"], p["year_of_birth"]),
-            )
-        for n in notes["notes"]:
-            conn.execute(
-                "INSERT INTO note (note_id, person_id, note_date, note_datetime,"
-                " note_type_concept_id, note_class_concept_id, note_text,"
-                " encoding_concept_id, language_concept_id) VALUES (?,?,?,?,32817,0,?,0,0)",
-                (n["note_id"], n["person_id"], n["note_date"], n["note_datetime"], n["note_text"]),
-            )
-        conn.commit()
-        conn.close()
+        # Use the real init-cdm path so the tests exercise the same note/person
+        # key allocation and note_source_value crosswalk that production uses.
+        rc = cli.main(
+            [
+                "init-cdm",
+                "--cdm", str(self.cdm_path),
+                "--notes", str(FIXTURES / "notes" / "notes.json"),
+            ]
+        )
+        assert rc == 0
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
@@ -171,6 +163,95 @@ class TestForeignKeys(WriterTestBase):
         self.assertIs(planned.reason, Reason.PERSON_MISMATCH)
 
 
+class TestNoteIdCrosswalk(WriterTestBase):
+    """The platform emits string note ids; CDM NOTE.note_id is an integer."""
+
+    STRING_ID = "2025-05-02__memory_clinic"
+
+    def test_string_note_id_resolves_via_note_source_value(self) -> None:
+        planned = self.plan_one(
+            base_record(note_id=self.STRING_ID, span={"start": 112, "end": 116})
+        )
+        self.assertIs(planned.disposition, Disposition.WRITTEN)
+        self.assertIsInstance(planned.resolved_note_id, int)
+        self.assertEqual(planned.note_nlp_row["note_id"], planned.resolved_note_id)
+        # The integer key, not the string, lands in NOTE_NLP.
+        self.assertNotEqual(planned.note_nlp_row["note_id"], self.STRING_ID)
+
+    def test_numeric_string_resolves_by_source_value_never_by_coercion(self) -> None:
+        """A numeric string is a source value, not a CDM key.
+
+        The string-id note was allocated CDM key 1 with
+        note_source_value="2025-05-02__memory_clinic".  So int 1 finds it by key,
+        while the string "1" must NOT — nothing has that source value.  This is
+        the distinction that would collapse if we coerced digit strings to ints.
+        """
+        by_key = self.plan_one(base_record(note_id=1, span={"start": 112, "end": 116}))
+        self.assertEqual(by_key.resolved_note_id, 1)
+
+        as_source_value = self.plan_one(base_record(note_id="1"))
+        self.assertIs(as_source_value.reason, Reason.NOTE_NOT_FOUND)
+
+    def test_unknown_string_id_reports_the_crosswalk_gap(self) -> None:
+        planned = self.plan_one(base_record(note_id="2099-01-01__nonexistent"))
+        self.assertIs(planned.reason, Reason.NOTE_NOT_FOUND)
+        self.assertIn("note_source_value", planned.detail)
+
+    def test_string_person_id_resolves_via_person_source_value(self) -> None:
+        planned = self.plan_one(base_record(person_id="SYNTH-001"))
+        self.assertIs(planned.disposition, Disposition.WRITTEN)
+        self.assertEqual(planned.resolved_person_id, 1)
+        self.assertEqual(planned.domain_row["person_id"], 1)
+
+    def test_unknown_string_person_is_skipped(self) -> None:
+        planned = self.plan_one(base_record(person_id="SYNTH-999"))
+        self.assertIs(planned.reason, Reason.PERSON_NOT_FOUND)
+
+    def test_ledger_keeps_the_upstream_id(self) -> None:
+        record = base_record(note_id=self.STRING_ID, span={"start": 112, "end": 116})
+        with self.writer() as w:
+            w.execute(w.plan([ExtractionRecord.from_dict(record)]))
+            row = w.conn.execute(
+                "SELECT note_id, source_note_id FROM nlp_record_ledger"
+            ).fetchone()
+            self.assertEqual(row["source_note_id"], self.STRING_ID)
+            self.assertIsInstance(row["note_id"], int)
+
+
+class TestOmopSourcedEvidenceIsRefused(WriterTestBase):
+    """Rubric evidence can cite a structured row the extractor READ.
+
+    Writing that back would re-insert existing EHR data as NLP-derived — the
+    exact contamination the provenance flag exists to prevent.
+    """
+
+    def test_omop_sourced_record_writes_nothing_at_all(self) -> None:
+        planned = self.plan_one(base_record(evidence_source="omop"))
+        self.assertIs(planned.disposition, Disposition.SKIPPED)
+        self.assertIs(planned.reason, Reason.NOT_NOTE_DERIVED)
+        # Not even a NOTE_NLP row: it was never in a note.
+        self.assertIsNone(planned.note_nlp_row)
+
+    def test_note_sourced_and_unset_are_both_accepted(self) -> None:
+        self.assertIs(
+            self.plan_one(base_record(evidence_source="note")).disposition,
+            Disposition.WRITTEN,
+        )
+        self.assertIs(
+            self.plan_one(base_record()).disposition, Disposition.WRITTEN
+        )
+
+    def test_omop_sourced_record_survives_execute_without_inserting(self) -> None:
+        with self.writer() as w:
+            w.execute(w.plan([ExtractionRecord.from_dict(base_record(evidence_source="omop"))]))
+            for table in ("note_nlp", "observation", "nlp_record_ledger"):
+                self.assertEqual(
+                    w.conn.execute(f"SELECT COUNT(*) c FROM {table}").fetchone()["c"],
+                    0,
+                    f"{table} should be untouched",
+                )
+
+
 class TestExecuteAndIdempotency(WriterTestBase):
     def test_dry_run_writes_nothing(self) -> None:
         with self.writer() as w:
@@ -203,8 +284,8 @@ class TestExecuteAndIdempotency(WriterTestBase):
                 self.assertEqual(
                     w.conn.execute(f"SELECT COUNT(*) c FROM {table}").fetchone()["c"], 0
                 )
-            # The note itself must survive an unload.
-            self.assertEqual(w.conn.execute("SELECT COUNT(*) c FROM note").fetchone()["c"], 2)
+            # The notes themselves must survive an unload.
+            self.assertEqual(w.conn.execute("SELECT COUNT(*) c FROM note").fetchone()["c"], 3)
 
 
 class TestAdapterJoin(unittest.TestCase):
@@ -212,7 +293,7 @@ class TestAdapterJoin(unittest.TestCase):
         records, warnings = build_records(
             FIXTURES / "chart_review_output", FIXTURES / "normalizer_output"
         )
-        self.assertEqual(len(records), 10)
+        self.assertEqual(len(records), 12)
         by_variant = {(r.note_id, r.lexical_variant): r for r in records}
         mmse = by_variant[(1001, "MMSE")]
         self.assertEqual(mmse.concept_id, 42869861)
@@ -224,7 +305,7 @@ class TestAdapterJoin(unittest.TestCase):
 
     def test_ner_only_still_produces_records(self) -> None:
         records, _ = build_records(FIXTURES / "chart_review_output", None)
-        self.assertEqual(len(records), 10)
+        self.assertEqual(len(records), 12)
         self.assertTrue(all(r.concept_id is None for r in records))
 
     def test_negation_comes_through_from_the_assertion_field(self) -> None:
@@ -268,12 +349,12 @@ class TestCli(WriterTestBase):
         )
         self.assertEqual(rc, 0)
         conn = connect(self.cdm_path)
-        self.assertEqual(conn.execute("SELECT COUNT(*) c FROM note_nlp").fetchone()["c"], 10)
+        self.assertEqual(conn.execute("SELECT COUNT(*) c FROM note_nlp").fetchone()["c"], 11)
         nlp_rows = conn.execute(
             "SELECT COUNT(*) c FROM observation WHERE observation_type_concept_id = ?",
             (NLP_TYPE_CONCEPT_ID,),
         ).fetchone()["c"]
-        self.assertEqual(nlp_rows, 2)
+        self.assertEqual(nlp_rows, 3)
         conn.close()
 
 

@@ -61,6 +61,10 @@ def read_entities(path: Path) -> Iterator[dict[str, Any]]:
 
         for entity in doc.get("entities", []):
             span = entity.get("span") or {}
+            if "start" not in span and isinstance(entity.get("span_offsets"), list):
+                # Rubric-answer evidence uses span_offsets: [start, end].
+                start_end = entity["span_offsets"]
+                span = {"start": start_end[0], "end": start_end[1]}
             if "start" not in span or "end" not in span:
                 raise ValueError(
                     f"{file}: entity {entity.get('entity_id')} has no character span — "
@@ -76,8 +80,15 @@ def read_entities(path: Path) -> Iterator[dict[str, Any]]:
 
             yield {
                 "record_id": f"cr:{note_id}:{span['start']}-{span['end']}",
-                "note_id": int(note_id),
-                "person_id": int(person_id),
+                # Passed through with its type intact: the platform emits string
+                # note ids like "2024-12-04__pathology_report", which the writer
+                # resolves via NOTE.note_source_value.  Do not coerce to int here
+                # — that would turn a source value into a bogus CDM key.
+                "note_id": note_id,
+                "person_id": person_id,
+                # "omop"-sourced evidence cites a structured row the extractor
+                # read; the writer refuses to insert those.
+                "evidence_source": entity.get("source", "note"),
                 "span": {"start": int(span["start"]), "end": int(span["end"])},
                 "lexical_variant": entity.get("text"),
                 "snippet": entity.get("quote"),

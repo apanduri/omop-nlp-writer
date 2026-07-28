@@ -22,7 +22,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-JoinKey = tuple[int, int, int]
+# note_id keeps its upstream type (the platform emits strings like
+# "2024-12-04__pathology_report"), so the key must not coerce it.
+JoinKey = tuple[int | str, int, int]
 
 
 class Normalization(dict):
@@ -52,7 +54,7 @@ def read_normalizations(path: Path) -> dict[JoinKey, Normalization]:
                     f"{file}: mention {mention.get('mention_id')} lacks note_id/span — "
                     f"cannot be joined to an NER mention"
                 )
-            key: JoinKey = (int(note_id), int(span["start"]), int(span["end"]))
+            key: JoinKey = (note_id, int(span["start"]), int(span["end"]))
             best = _best_candidate(mention.get("candidates") or [])
             index[key] = Normalization(
                 concept_id=best.get("concept_id") if best else None,
