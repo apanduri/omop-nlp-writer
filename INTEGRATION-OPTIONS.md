@@ -1,8 +1,17 @@
 # Wiring the three repos together
 
-For the meeting with Yuhang and Xuguang. Four ways the pieces could talk. We are
-currently on **Option A**, which is deliberate — it's the only one that lets each
-piece be developed and tested without the other two running.
+> **DECIDED 2026-07-28 by Hongyu: Option C — separate, independently running
+> services.** Shared storage (D) and a single combined tool (B) are ruled out.
+> The analysis below is kept for the record; see "Consequences of Option C" at
+> the end for what actually changes.
+>
+> Hongyu also independently confirmed the load-bearing constraint: the query
+> pipeline does not query NOTE_NLP, so normalized extractions **must** also be
+> written to OBSERVATION / MEASUREMENT / CONDITION_OCCURRENCE. That is exactly
+> why this writer produces two rows per mention.
+
+Four ways the pieces could talk. Option A is how the code works today, and it
+remains the local-development mode regardless of the deployed topology.
 
 The three pieces:
 
@@ -98,7 +107,36 @@ replacement for it.
 
 ---
 
-## Recommendation
+## Consequences of Option C (the decision)
+
+What this repo needs, given "separate, independently running services":
+
+1. **An HTTP ingest endpoint** wrapping the existing writer:
+   `POST /extractions` taking a batch of `ExtractionRecord`s (the CONTRACT.md
+   body, unchanged — it becomes the request payload instead of a file),
+   `?dry_run=true` returning the same plan report without inserting.
+   `plan()`/`execute()` are already separate, so this is a thin layer.
+2. **Idempotency across the wire.** Retries and double-sends are a fact of
+   service-to-service calls. `nlp_record_ledger` already handles this: a replayed
+   batch returns `already_loaded` per record rather than duplicating rows. This
+   is the main reason the ledger was worth building up front.
+3. **A caller.** Someone has to sequence NER → normalize → load. Either the
+   chart-review platform calls the normalizer then calls us, or a thin
+   orchestrator does. **Worth settling explicitly** — with three independent
+   services and no named orchestrator, this step tends to end up owned by nobody.
+4. **Batch semantics.** Partial failure in a batch: all-or-nothing (current
+   behaviour — one transaction, rollback on error), or per-record best-effort
+   with a per-record status list? Per-record status is friendlier for a caller
+   retrying only what failed. Needs deciding before the endpoint is published.
+5. **The CLI stays.** It is how the service is developed, tested, and demoed
+   without the other two services running. Option A does not go away; it becomes
+   the local mode.
+
+Deliberately *not* adopted: no message broker, no shared database between
+services, no shared Python package imported by the others. Each service owns its
+own storage and speaks only over the contract.
+
+## Original recommendation (superseded)
 
 **Stay on A now. Plan for D as the second step, not C or B.**
 
