@@ -6,9 +6,9 @@ structured EHR data.
 
 ```
 chart-review NER output ─┐
-  (Yuhang's pipeline)    ├─► ExtractionRecord ─► NOTE_NLP  ─┐
+                         ├─► ExtractionRecord ─► NOTE_NLP  ─┐
 normalizer output ───────┘    (CONTRACT.md)    └► domain table (OBSERVATION, …)
-  (Xuguang's pipeline)                              │
+                                                    │
                                                     ▼
                               computable_phenotype_library generates cohort SQL
                               that reads these rows
@@ -37,7 +37,7 @@ python3 -m omop_nlp_writer verify
 python3 -m omop_nlp_writer unload            # reverse it
 ```
 
-The worked example from Hongyu's email, end to end:
+The reference example (MMSE = 22), end to end:
 
 ```
 OK   note 1001 @130-134    'MMSE'
@@ -115,7 +115,7 @@ not part of the CDM.
     WHERE vocabulary_id = 'Type Concept' AND concept_name LIKE '%NLP%';
    ```
 2. **Replace the synthetic vocabulary.** `fixtures/vocab_mini.csv` is fabricated;
-   only `42869861` is authoritative (it came from the email). It's
+   only `42869861` is known-good (it was given as the reference example). It's
    schema-identical to computable_phenotype_library's `concept.db`, so
    `--vocab /path/to/concept.db` is the whole switch.
 3. **Point at a real CDM.** SQLite here for zero-setup. Eunomia or Synthea+ETL
@@ -133,13 +133,14 @@ Every fixture here is fabricated, per the instruction to develop against
 synthetic data only. Notes carry a `SYNTHETIC NOTE - NOT REAL PATIENT DATA`
 header. Do not point `init-cdm` at real notes.
 
-## Open questions for Yuhang and Xuguang
+## Assumptions the upstream formats have to confirm
 
-Full list in [CONTRACT.md](CONTRACT.md). The two that will cost the most time:
+Documented in [CONTRACT.md](CONTRACT.md). The two that would cost the most to get
+wrong:
 
-- **`note_id` identity.** `NOTE_NLP.note_id` is a FK into `NOTE`. Do the notes
-  the chart-review pipeline reads already exist in a CDM `NOTE` table, or do they
-  need loading plus an ID crosswalk?
+- **`note_id` identity.** `NOTE_NLP.note_id` is a FK into `NOTE`. Notes must
+  already exist in the CDM `NOTE` table under the same ids the extraction output
+  uses, or an ID crosswalk is required.
 - **The join key.** This assumes `(note_id, span.start, span.end)` links an NER
   mention to its normalization. If the normalizer takes bare strings with no
   offsets, the join is ambiguous for any term appearing twice in one note.
