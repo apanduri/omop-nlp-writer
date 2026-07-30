@@ -10,3 +10,13 @@ __pycache__/
 # in this repo.
 notes_real/
 phi/
+
+# Deny CSV/JSON/JSONL at the repo root and in any incoming/ directory: sample
+# data arriving from collaborators lands there and may contain real notes.
+# fixtures/ is re-allowed below because everything in it is fabricated.
+/*.csv
+/*.json
+/*.jsonl
+/*.txt
+incoming/
+!fixtures/**
