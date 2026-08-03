@@ -354,7 +354,9 @@ class TestCli(WriterTestBase):
             "SELECT COUNT(*) c FROM observation WHERE observation_type_concept_id = ?",
             (NLP_TYPE_CONCEPT_ID,),
         ).fetchone()["c"]
-        self.assertEqual(nlp_rows, 3)
+        # 3x MMSE + 1x fall. "Fall" (436583) is an Observation in OMOP, not a
+        # Condition — a good reminder that the vocabulary decides the domain.
+        self.assertEqual(nlp_rows, 4)
         conn.close()
 
 

@@ -13,7 +13,7 @@
       "candidates": [
         {
           "concept_id": 42869861,
-          "concept_name": "Mini-Mental State Examination [MMSE] Observation",
+          "concept_name": "Mini-Mental State Examination [MMSE]",
           "vocabulary_id": "LOINC",
           "score": 0.97
         }
@@ -63,8 +63,8 @@
       "text": "donepezil",
       "candidates": [
         {
-          "concept_id": 1518254,
-          "concept_name": "Donepezil",
+          "concept_id": 715997,
+          "concept_name": "donepezil",
           "vocabulary_id": "RxNorm",
           "score": 0.93
         }

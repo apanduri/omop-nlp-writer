@@ -14,17 +14,21 @@ from dataclasses import dataclass
 # Provenance: how NLP-derived rows stay distinguishable from structured EHR data
 # ---------------------------------------------------------------------------
 
-# OMOP "Type Concept" vocabulary id for NLP-derived records.  Every domain row
-# this writer creates carries it in the table's *_type_concept_id column, which
-# is the CDM-sanctioned way to record provenance.
+# OMOP "Type Concept" for NLP-derived records.  Every domain row this writer
+# creates carries it in the table's *_type_concept_id column, which is the
+# CDM-sanctioned way to record provenance.
 #
-# VERIFY against the real vocabulary before any non-synthetic use: run
-#   SELECT concept_id, concept_name FROM concept
-#    WHERE vocabulary_id = 'Type Concept' AND concept_name LIKE '%NLP%';
-# and correct this constant.  The synthetic dev vocab defines it so the writer
-# is exercisable today.
-NLP_TYPE_CONCEPT_ID = 32468
-NLP_TYPE_CONCEPT_NAME = "Natural Language Processing"
+# VERIFIED 2026-08-03 against the full Athena vocabulary (6.4M concepts):
+#   32858 | NLP | Type Concept | Type Concept | standard_concept = S
+# For contrast, the neighbours we are NOT using:
+#   32817 | EHR            (structured EHR data — what NLP rows must be distinct from)
+#   32831 | EHR note       (the note itself, not a fact derived from it)
+#   32468 | Inferred from claim  (Procedure Type — an earlier wrong guess here)
+NLP_TYPE_CONCEPT_ID = 32858
+NLP_TYPE_CONCEPT_NAME = "NLP"
+
+# Structured-EHR type concept, for reference in provenance reporting.
+EHR_TYPE_CONCEPT_ID = 32817
 
 # Second, belt-and-braces provenance signal: surrogate keys for NLP-derived rows
 # are allocated above this base, so an NLP row is identifiable from its id alone

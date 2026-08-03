@@ -119,29 +119,34 @@ not part of the CDM.
 **Zero-length events.** A note mention implies no duration, so
 `condition_end_date == condition_start_date`. Inventing a duration would be worse.
 
+## Vocabulary
+
+The real OMOP vocabulary lives in `vocab/` (gitignored — 1.1 GB):
+
+```
+vocab/concept.db               6,414,175 concepts   (full Athena bundle)
+vocab/concept_relationship.db  1,692,952 relationships
+```
+
+Run against it with `--vocab vocab/concept.db`. It is schema-identical to
+computable_phenotype_library's `concept.db` — the same file, in fact, copied from
+the CP server. `fixtures/vocab_mini.csv` remains for fast offline tests.
+
+**Provenance concept, verified 2026-08-03** against that vocabulary:
+`32858 = NLP` (Type Concept, standard). Worth recording what it is *not* —
+`32468`, an earlier guess here, is "Inferred from claim" (Procedure Type), and
+`32817 = EHR` is the structured-data type NLP rows must stay distinct from.
+
 ## Before this touches anything real
 
-1. **Verify `NLP_TYPE_CONCEPT_ID`** ([domains.py](omop_nlp_writer/domains.py)).
-   `32468` is used as "Natural Language Processing" and is defined in the
-   synthetic vocab so the writer runs today — confirm it against a real
-   vocabulary before relying on it:
-   ```sql
-   SELECT concept_id, concept_name FROM concept
-    WHERE vocabulary_id = 'Type Concept' AND concept_name LIKE '%NLP%';
-   ```
-2. **Replace the synthetic vocabulary.** `fixtures/vocab_mini.csv` is fabricated;
-   only `42869861` is known-good (it was given as the reference example). It's
-   schema-identical to computable_phenotype_library's `concept.db`, so
-   `--vocab /path/to/concept.db` is the whole switch.
-3. **Point at a real CDM.** SQLite here for zero-setup. Eunomia or Synthea+ETL
-   next; Postgres is a connection change, not a schema change. `cdm.py` creates
+1. **Point at a real CDM.** SQLite here for zero-setup; Eunomia or Synthea+ETL
+   next. Postgres is a connection change, not a schema change. `cdm.py` creates
    only the tables this writer touches — it is not a conformant full CDM.
-4. **Settle the `planned` assertion policy.** `"start donepezil"` currently
+2. **Settle the `planned` assertion policy.** `"start donepezil"` currently
    produces a DRUG_EXPOSURE row. A planned medication arguably is not an
    exposure. One dict in
    [adapters/chart_review.py](omop_nlp_writer/adapters/chart_review.py) flips it;
    the assertion is preserved in `term_modifiers` either way.
-
 ## Synthetic data only
 
 Every fixture here is fabricated, per the instruction to develop against
