@@ -17,6 +17,7 @@ from . import chart_review, normalizer
 def build_records(
     chart_review_path: Path,
     normalizer_path: Path | None = None,
+    vocab: object | None = None,
 ) -> tuple[list[ExtractionRecord], list[str]]:
     """Join the two pipelines' outputs into ExtractionRecords.
 
@@ -55,6 +56,26 @@ def build_records(
                     f"{partial['lexical_variant']!r} at note {key[0]}: "
                     f"{norm['candidate_count']} candidates, took top score {norm.score}"
                 )
+        # No separate normalizer output? Resolve the BSO-AD pair the NER stage
+        # already emits against the registered custom vocabulary.  This is the
+        # whole "target OMOP" path: a deterministic registry lookup, then the
+        # writer follows 'Maps to' to a standard concept where one exists.
+        if partial.get("concept_id") is None and vocab is not None:
+            et, cn = partial.get("entity_type"), partial.get("concept_name")
+            if et and cn:
+                resolved = vocab.concept_id_for_source(et, cn)
+                if resolved is None:
+                    warnings.append(
+                        f"{cn!r} (entity_type {et}) is not in the registered "
+                        f"vocabulary — run register-vocab, or it is a new "
+                        f"novel_candidate not yet promoted into the ontology"
+                    )
+                else:
+                    partial["concept_id"] = resolved
+                    partial["concept_confidence"] = (
+                        None if partial.get("match_status") == "mapped_uncertain" else 1.0
+                    )
+
         # record_id includes the concept so re-normalizing to a different concept
         # is a new record rather than a silent no-op on re-run.
         partial["record_id"] = f"{partial['record_id']}:{partial.get('concept_id') or 0}"

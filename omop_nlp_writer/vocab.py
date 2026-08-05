@@ -25,6 +25,9 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+# Kept local to avoid a circular import with register.py.
+CUSTOM_ID_BASE = 2_000_000_000
+
 CONCEPT_DDL = """
 CREATE TABLE IF NOT EXISTS concept (
     concept_id       INTEGER PRIMARY KEY,
@@ -67,6 +70,12 @@ class Resolution:
     source: ConceptRecord
     standard: ConceptRecord | None
     via_maps_to: bool
+    # True when `standard` is a registered CUSTOM concept rather than an OMOP
+    # standard one.  These are writable — Hongyu approved custom concepts
+    # "provided that they are also added to the CONCEPT table so the pipeline can
+    # process them" — but they are local to this CDM and not portable, so the
+    # distinction is tracked rather than blurred.
+    is_custom: bool = False
 
     @property
     def is_writable(self) -> bool:
@@ -81,7 +90,12 @@ class Resolution:
 class VocabLookup:
     """Read-only concept lookups, cached in-process."""
 
-    def __init__(self, db_path: Path, relationship_db_path: Path | None = None):
+    def __init__(
+        self,
+        db_path: Path,
+        relationship_db_path: Path | None = None,
+        registry_path: Path | None = None,
+    ):
         if not db_path.exists():
             raise FileNotFoundError(
                 f"Vocabulary DB not found at {db_path}. "
@@ -129,6 +143,67 @@ class VocabLookup:
             )
         self._maps_to_cache: dict[int, list[int]] = {}
 
+        # Custom concepts (concept_id >= 2e9) live in their own registry rather
+        # than being written into the 1.1 GB shared concept.db.  Lookups route by
+        # id range, so a custom concept resolves and carries its own 'Maps to'.
+        if registry_path is None:
+            sibling = db_path.parent / "custom_vocab.db"
+            registry_path = sibling if sibling.exists() else None
+        self.registry_path = registry_path
+        self._reg_conn: sqlite3.Connection | None = None
+        if registry_path is not None and registry_path.exists():
+            self._reg_conn = sqlite3.connect(f"file:{registry_path}?mode=ro", uri=True)
+            self._reg_conn.row_factory = sqlite3.Row
+
+    @property
+    def has_custom_registry(self) -> bool:
+        return self._reg_conn is not None
+
+    def _find_custom(self, concept_id: int) -> ConceptRecord | None:
+        if self._reg_conn is None:
+            return None
+        row = self._reg_conn.execute(
+            """SELECT concept_id, concept_name, domain_id, vocabulary_id,
+                      concept_class_id, standard_concept, concept_code, invalid_reason
+                 FROM custom_concept WHERE concept_id = ?""",
+            (concept_id,),
+        ).fetchone()
+        return None if row is None else ConceptRecord(
+            concept_id=int(row["concept_id"]),
+            concept_name=(row["concept_name"] or "").strip(),
+            domain_id=(row["domain_id"] or "").strip(),
+            vocabulary_id=(row["vocabulary_id"] or "").strip(),
+            concept_class_id=(row["concept_class_id"] or None),
+            standard_concept=(row["standard_concept"] or None),
+            concept_code=(row["concept_code"] or "").strip(),
+            invalid_reason=(row["invalid_reason"] or None),
+        )
+
+    def concept_id_for_source(self, entity_type: str, concept_name: str) -> int | None:
+        """(entity_type, concept_name) -> custom concept_id.
+
+        The join the adapter needs.  Keyed on the pair because the source
+        ontology's own ids are not unique across subtrees.
+        """
+        if self._reg_conn is None:
+            return None
+        row = self._reg_conn.execute(
+            "SELECT concept_id FROM custom_concept WHERE source_key = ?",
+            (f"{entity_type}|{concept_name}",),
+        ).fetchone()
+        return int(row["concept_id"]) if row else None
+
+    def _custom_maps_to(self, concept_id: int) -> list[int]:
+        if self._reg_conn is None:
+            return []
+        rows = self._reg_conn.execute(
+            """SELECT concept_id_2 FROM custom_concept_relationship
+                WHERE concept_id_1 = ? AND relationship_id = 'Maps to'
+                  AND (invalid_reason IS NULL OR invalid_reason = '')""",
+            (concept_id,),
+        ).fetchall()
+        return [int(r["concept_id_2"]) for r in rows]
+
     @property
     def has_relationships(self) -> bool:
         return self._rel_conn is not None
@@ -146,14 +221,29 @@ class VocabLookup:
         if source.standard_concept == "S":
             return Resolution(source=source, standard=source, via_maps_to=False)
 
+        # Prefer a standard OMOP equivalent when one exists, custom or not.
         for target_id in self.maps_to(concept_id):
             target = self.find(target_id)
             if target is not None and target.standard_concept == "S":
                 return Resolution(source=source, standard=target, via_maps_to=True)
+
+        # A registered custom concept with no standard equivalent is the terminal
+        # representation, not a mapping failure: it was minted precisely because
+        # OMOP has nothing for it, and it carries a domain and ancestor rows so
+        # the query pipeline can use it.  A NON-standard *OMOP* concept with no
+        # 'Maps to' is a different case and still refused — there the standard
+        # equivalent exists and we simply failed to find it.
+        if concept_id >= CUSTOM_ID_BASE and source.domain_id:
+            return Resolution(
+                source=source, standard=source, via_maps_to=False, is_custom=True
+            )
+
         return Resolution(source=source, standard=None, via_maps_to=False)
 
     def maps_to(self, concept_id: int) -> list[int]:
         """concept_ids this concept 'Maps to'. Empty if unknown or unmapped."""
+        if concept_id >= CUSTOM_ID_BASE:
+            return self._custom_maps_to(concept_id)
         if self._rel_conn is None:
             return []
         if concept_id in self._maps_to_cache:
@@ -175,6 +265,10 @@ class VocabLookup:
     def find(self, concept_id: int) -> ConceptRecord | None:
         if concept_id in self._cache:
             return self._cache[concept_id]
+        if concept_id >= CUSTOM_ID_BASE:
+            record = self._find_custom(concept_id)
+            self._cache[concept_id] = record
+            return record
         row = self._conn.execute(
             """
             SELECT concept_id, concept_name, domain_id, vocabulary_id,
@@ -202,6 +296,8 @@ class VocabLookup:
         self._conn.close()
         if self._rel_conn is not None:
             self._rel_conn.close()
+        if self._reg_conn is not None:
+            self._reg_conn.close()
 
 
 def build_from_csv(csv_path: Path, db_path: Path) -> int:

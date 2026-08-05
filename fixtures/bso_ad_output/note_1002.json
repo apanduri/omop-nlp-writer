@@ -1,0 +1,67 @@
+{
+  "pipeline": "chart-review-platform",
+  "version": "0.3.1",
+  "model": "claude-opus-4-5",
+  "review_kind": "ner",
+  "note_id": 1002,
+  "patient_id": 2,
+  "note_datetime": "2025-04-02T14:05:00",
+  "_comment": "Shaped like BSO-AD NER output: entity_type + concept_name, NO concept_id. Exercises the registry lookup path. Fabricated.",
+  "entities": [
+    {
+      "entity_id": "1002-283-292",
+      "text": "pneumonia",
+      "anchor": "pneumonia",
+      "span": {"start": 293, "end": 302},
+      "quote": "...seen in an inpatient visit last year for pneumonia...",
+      "entity_type": "Dementia",
+      "concept_name": "Lewy_Body_Disease",
+      "status": "mapped",
+      "match_kind": "exact",
+      "assertion": "present",
+      "temporality": "history",
+      "confidence": 0.9
+    },
+    {
+      "entity_id": "1002-304-311",
+      "text": "Frailty",
+      "anchor": "Frailty",
+      "span": {"start": 304, "end": 311},
+      "quote": "...Frailty noted; gait speed markedly reduced...",
+      "entity_type": "Demographic",
+      "concept_name": "Married",
+      "status": "mapped",
+      "match_kind": "exact",
+      "assertion": "present",
+      "temporality": "current",
+      "confidence": 0.85
+    },
+    {
+      "entity_id": "1002-319-329",
+      "text": "gait speed",
+      "anchor": "gait speed",
+      "span": {"start": 319, "end": 329},
+      "quote": "...gait speed markedly reduced...",
+      "entity_type": "Element_Relevant_to_Behavior_and_Lifestyle",
+      "concept_name": "Treadmill",
+      "status": "mapped_uncertain",
+      "match_kind": "mapped_uncertain_parent_fallback",
+      "assertion": "present",
+      "temporality": "current",
+      "confidence": 0.6
+    },
+    {
+      "entity_id": "1002-92-96",
+      "text": "fall",
+      "anchor": "fall",
+      "span": {"start": 92, "end": 96},
+      "quote": "...after a mechanical fall at home last week...",
+      "entity_type": "Dementia",
+      "concept_name": "Concept_Not_In_Ontology_Yet",
+      "status": "novel_candidate",
+      "assertion": "present",
+      "temporality": "history",
+      "confidence": 0.7
+    }
+  ]
+}

@@ -89,6 +89,14 @@ def read_entities(path: Path) -> Iterator[dict[str, Any]]:
                 # "omop"-sourced evidence cites a structured row the extractor
                 # read; the writer refuses to insert those.
                 "evidence_source": entity.get("source", "note"),
+                # BSO-AD is vendored inside the platform, so its NER output
+                # already carries the normalized concept as (entity_type,
+                # concept_name).  Passed through for the registry lookup; the
+                # pair is the identity because the ontology's own ids collide
+                # across subtrees.
+                "entity_type": entity.get("entity_type"),
+                "concept_name": entity.get("concept_name"),
+                "match_status": entity.get("status"),
                 "span": {"start": int(span["start"]), "end": int(span["end"])},
                 "lexical_variant": entity.get("text"),
                 "snippet": entity.get("quote"),
