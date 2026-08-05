@@ -147,6 +147,40 @@ the CP server. `fixtures/vocab_mini.csv` remains for fast offline tests.
    exposure. One dict in
    [adapters/chart_review.py](omop_nlp_writer/adapters/chart_review.py) flips it;
    the assertion is preserved in `term_modifiers` either way.
+## End-to-end proof
+
+`scripts/cohort_demo.py` closes the loop: an NLP-extracted fact is found by real
+OHDSI-generated cohort SQL.
+
+```
+BSO-AD NER output          (Behavior_and_Lifestyle, Treadmill)
+  -> register-vocab        custom concept 2030233672, Observation domain
+  -> load                  OBSERVATION row, type_concept_id 32858 (NLP)
+  -> CirceR                cohort SQL for "Exercise equipment + descendants"
+  -> run                   person_id=2 (SYNTH-002) 2025-04-02 .. 2026-12-31
+```
+
+The cohort is defined on the **parent** concept, which no CDM row carries. It can
+only return anyone if the `CONCEPT_ANCESTOR` rows generated from BSO-AD's own
+hierarchy are right — so it tests the thing most likely to fail silently.
+Verified by negative control: deleting the single ancestor row linking `Treadmill`
+to `Exercise equipment` drops the cohort to zero patients.
+
+Two things learned running it:
+
+**CirceR is not installed locally** — it lives in the CP server's backend
+container. `prepare` emits a cohort expression, CirceR turns it into SQL there,
+and `run` executes that SQL here. SQL generation is pure computation and touches
+no patient data.
+
+**SqlRender's SQLite dialect assumes NUMERIC epoch dates.** It renders every date
+operation as `CAST(STRFTIME('%s', DATETIME(col, 'unixepoch', ...)) AS REAL)`,
+which is how DatabaseConnector loads a SQLite CDM. This writer stores ISO text —
+readable, and what Postgres wants — so date comparisons silently match nothing and
+the cohort returns zero rows with no error. `run` therefore executes against an
+epoch-converted copy rather than patching the generated SQL, so what runs is what
+OHDSI tooling would run. A Postgres CDM never hits this.
+
 ## Synthetic data only
 
 Every fixture here is fabricated, per the instruction to develop against
