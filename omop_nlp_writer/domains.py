@@ -44,6 +44,9 @@ class DomainTarget:
     pk: str
     concept_column: str
     source_value_column: str
+    # Holds the pre-Maps-to concept when a non-standard concept was resolved.
+    # SPECIMEN has no such column in CDM 5.4, hence optional.
+    source_concept_column: str | None
     type_concept_column: str
     start_date_column: str
     start_datetime_column: str | None = None
@@ -58,6 +61,7 @@ DOMAIN_TARGETS: dict[str, DomainTarget] = {
         pk="observation_id",
         concept_column="observation_concept_id",
         source_value_column="observation_source_value",
+        source_concept_column="observation_source_concept_id",
         type_concept_column="observation_type_concept_id",
         start_date_column="observation_date",
         start_datetime_column="observation_datetime",
@@ -69,6 +73,7 @@ DOMAIN_TARGETS: dict[str, DomainTarget] = {
         pk="measurement_id",
         concept_column="measurement_concept_id",
         source_value_column="measurement_source_value",
+        source_concept_column="measurement_source_concept_id",
         type_concept_column="measurement_type_concept_id",
         start_date_column="measurement_date",
         start_datetime_column="measurement_datetime",
@@ -85,6 +90,7 @@ DOMAIN_TARGETS: dict[str, DomainTarget] = {
         pk="condition_occurrence_id",
         concept_column="condition_concept_id",
         source_value_column="condition_source_value",
+        source_concept_column="condition_source_concept_id",
         type_concept_column="condition_type_concept_id",
         start_date_column="condition_start_date",
         start_datetime_column="condition_start_datetime",
@@ -95,6 +101,7 @@ DOMAIN_TARGETS: dict[str, DomainTarget] = {
         pk="drug_exposure_id",
         concept_column="drug_concept_id",
         source_value_column="drug_source_value",
+        source_concept_column="drug_source_concept_id",
         type_concept_column="drug_type_concept_id",
         start_date_column="drug_exposure_start_date",
         start_datetime_column="drug_exposure_start_datetime",
@@ -105,6 +112,7 @@ DOMAIN_TARGETS: dict[str, DomainTarget] = {
         pk="procedure_occurrence_id",
         concept_column="procedure_concept_id",
         source_value_column="procedure_source_value",
+        source_concept_column="procedure_source_concept_id",
         type_concept_column="procedure_type_concept_id",
         start_date_column="procedure_date",
         start_datetime_column="procedure_datetime",
@@ -114,6 +122,7 @@ DOMAIN_TARGETS: dict[str, DomainTarget] = {
         pk="device_exposure_id",
         concept_column="device_concept_id",
         source_value_column="device_source_value",
+        source_concept_column="device_source_concept_id",
         type_concept_column="device_type_concept_id",
         start_date_column="device_exposure_start_date",
         start_datetime_column="device_exposure_start_datetime",
@@ -124,6 +133,7 @@ DOMAIN_TARGETS: dict[str, DomainTarget] = {
         pk="specimen_id",
         concept_column="specimen_concept_id",
         source_value_column="specimen_source_value",
+        source_concept_column=None,
         type_concept_column="specimen_type_concept_id",
         start_date_column="specimen_date",
         start_datetime_column="specimen_datetime",

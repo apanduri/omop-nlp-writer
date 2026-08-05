@@ -24,7 +24,7 @@ from .domains import (
     route,
 )
 from .record import ExtractionRecord
-from .vocab import VocabLookup
+from .vocab import Resolution, VocabLookup
 
 
 class Disposition(str, Enum):
@@ -45,6 +45,7 @@ class Reason(str, Enum):
     NEGATED = "term_exists=false"
     UNMAPPED = "no_concept_id"
     CONCEPT_NOT_IN_VOCAB = "concept_not_in_vocabulary"
+    NO_STANDARD_MAPPING = "non_standard_concept_with_no_maps_to"
     LOW_CONFIDENCE = "below_confidence_threshold"
     DOMAIN_NOT_ROUTED = "domain_not_routed"
     NO_DOMAIN_ON_CONCEPT = "concept_has_no_domain_id"
@@ -97,11 +98,12 @@ class CdmNlpWriter:
         *,
         confidence_threshold: float = 0.0,
         create: bool = False,
+        relationship_path: Path | None = None,
     ):
         self.conn = connect(cdm_path, create=create)
         if create:
             init_schema(self.conn)
-        self.vocab = VocabLookup(vocab_path)
+        self.vocab = VocabLookup(vocab_path, relationship_path)
         self.confidence_threshold = confidence_threshold
         self._next_ids: dict[str, int] = {}
 
@@ -180,9 +182,16 @@ class CdmNlpWriter:
         note_nlp_row = self._build_note_nlp_row(record, note_nlp_id, resolved_note_id)
 
         # --- decide whether a domain row is also warranted --------------------
-        concept = self.vocab.find(record.concept_id) if record.is_normalized else None
-        domain_id = concept.domain_id if concept else None
-        concept_name = concept.concept_name if concept else None
+        # resolve() follows 'Maps to' when the concept is non-standard, because a
+        # non-standard concept in a domain table is invisible to cohort SQL.
+        resolution = self.vocab.resolve(record.concept_id) if record.is_normalized else None
+        standard = resolution.standard if resolution else None
+        domain_id = standard.domain_id if standard else None
+        concept_name = None
+        if resolution:
+            concept_name = resolution.source.concept_name
+            if resolution.via_maps_to and standard:
+                concept_name += f" -> {standard.concept_name}"
 
         def evidence_only(reason: Reason, detail: str | None = None) -> PlannedWrite:
             return PlannedWrite(
@@ -205,11 +214,21 @@ class CdmNlpWriter:
             )
         if not record.is_normalized:
             return evidence_only(Reason.UNMAPPED, "normalizer produced no concept_id")
-        if concept is None:
+        if resolution is None:
             return evidence_only(
                 Reason.CONCEPT_NOT_IN_VOCAB,
                 f"concept_id {record.concept_id} not found in {self.vocab.db_path.name}",
             )
+        if standard is None:
+            detail = (
+                f"concept {resolution.source.concept_id} "
+                f"({resolution.source.concept_name!r}, {resolution.source.vocabulary_id}) "
+                f"is non-standard and has no 'Maps to' a standard concept — a domain "
+                f"row carrying it would be invisible to cohort SQL"
+            )
+            if not self.vocab.has_relationships:
+                detail += f". Note: {self.vocab.relationship_warning}"
+            return evidence_only(Reason.NO_STANDARD_MAPPING, detail)
         if (
             self.confidence_threshold > 0
             and record.concept_confidence is not None
@@ -245,7 +264,7 @@ class CdmNlpWriter:
             target=target,
             domain_row_id=domain_row_id,
             domain_row=self._build_domain_row(
-                record, target, domain_row_id, resolved_person_id
+                record, target, domain_row_id, resolved_person_id, resolution
             ),
         )
 
@@ -318,18 +337,25 @@ class CdmNlpWriter:
         target: DomainTarget,
         row_id: int,
         resolved_person_id: int,
+        resolution: Resolution,
     ) -> dict[str, Any]:
         event_date = record.event_date
+        assert resolution.standard is not None
         row: dict[str, Any] = {
             target.pk: row_id,
             "person_id": resolved_person_id,
-            target.concept_column: record.concept_id,
+            # The STANDARD concept drives the query; see Resolution.
+            target.concept_column: resolution.standard.concept_id,
             target.start_date_column: event_date,
             # The provenance flag: this is what keeps NLP-derived rows
             # distinguishable from structured EHR data.
             target.type_concept_column: NLP_TYPE_CONCEPT_ID,
             target.source_value_column: record.lexical_variant,
         }
+        # When 'Maps to' was followed, the original non-standard concept is kept
+        # in *_source_concept_id so the mapping stays auditable and reversible.
+        if resolution.via_maps_to and target.source_concept_column:
+            row[target.source_concept_column] = resolution.source.concept_id
         if target.start_datetime_column:
             row[target.start_datetime_column] = record.note_datetime or f"{event_date}T00:00:00"
         if target.end_date_column:

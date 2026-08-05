@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -16,7 +17,7 @@ from omop_nlp_writer.adapters import build_records  # noqa: E402
 from omop_nlp_writer.cdm import connect, init_schema  # noqa: E402
 from omop_nlp_writer.domains import NLP_ID_BASE, NLP_TYPE_CONCEPT_ID  # noqa: E402
 from omop_nlp_writer.record import ContractError, ExtractionRecord  # noqa: E402
-from omop_nlp_writer.vocab import build_from_csv  # noqa: E402
+from omop_nlp_writer.vocab import VocabLookup, build_from_csv  # noqa: E402
 from omop_nlp_writer.writer import CdmNlpWriter, Disposition, Reason  # noqa: E402
 
 FIXTURES = ROOT / "fixtures"
@@ -216,6 +217,98 @@ class TestNoteIdCrosswalk(WriterTestBase):
             ).fetchone()
             self.assertEqual(row["source_note_id"], self.STRING_ID)
             self.assertIsInstance(row["note_id"], int)
+
+
+class TestStandardConceptResolution(WriterTestBase):
+    """Domain tables must carry STANDARD concepts.
+
+    Concept sets expand over CONCEPT_ANCESTOR, which holds only standard
+    concepts, so a non-standard concept in a domain table produces a row that
+    cohort SQL can never match.
+    """
+
+    NON_STANDARD = 4022331   # 'Connection of vena cava ... NOS', SNOMED, non-standard
+    ITS_STANDARD = 4022329   # what it 'Maps to'
+
+    def setUp(self) -> None:
+        super().setUp()
+        # Extend the synthetic vocab with a non-standard concept and its mapping.
+        conn = sqlite3.connect(self.vocab_path)
+        conn.execute(
+            "INSERT OR REPLACE INTO concept VALUES (?,?,?,?,?,?,?,?)",
+            (self.NON_STANDARD, "Connection of vena cava NOS", "Procedure",
+             "SNOMED", "Procedure", None, "X1", None),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO concept VALUES (?,?,?,?,?,?,?,?)",
+            (self.ITS_STANDARD, "Connection of vena cava", "Procedure",
+             "SNOMED", "Procedure", "S", "X2", None),
+        )
+        conn.commit()
+        conn.close()
+
+        # Deliberately NOT a sibling of vocab.db: VocabLookup auto-discovers a
+        # sibling maps_to.db, and one test needs the "no mapping available" path.
+        rel_dir = Path(self.tmp.name) / "rel"
+        rel_dir.mkdir()
+        self.maps_to_path = rel_dir / "maps_to.db"
+        rel = sqlite3.connect(self.maps_to_path)
+        rel.execute(
+            """CREATE TABLE concept_relationship (
+                   concept_id_1 INTEGER, concept_id_2 INTEGER,
+                   relationship_id TEXT, invalid_reason TEXT)"""
+        )
+        rel.execute(
+            "INSERT INTO concept_relationship VALUES (?,?,'Maps to',NULL)",
+            (self.NON_STANDARD, self.ITS_STANDARD),
+        )
+        rel.commit()
+        rel.close()
+
+    def test_non_standard_resolves_through_maps_to(self) -> None:
+        planned = self.plan_one(
+            base_record(concept_id=self.NON_STANDARD, value={}),
+            relationship_path=self.maps_to_path,
+        )
+        self.assertIs(planned.disposition, Disposition.WRITTEN)
+        # The row carries the STANDARD concept...
+        self.assertEqual(
+            planned.domain_row["procedure_concept_id"], self.ITS_STANDARD
+        )
+        # ...and preserves the original for audit.
+        self.assertEqual(
+            planned.domain_row["procedure_source_concept_id"], self.NON_STANDARD
+        )
+        # Domain comes from the standard concept.
+        self.assertEqual(planned.domain_id, "Procedure")
+
+    def test_standard_concept_sets_no_source_concept_id(self) -> None:
+        planned = self.plan_one(base_record(), relationship_path=self.maps_to_path)
+        self.assertNotIn("observation_source_concept_id", planned.domain_row)
+
+    def test_non_standard_without_mapping_is_evidence_only(self) -> None:
+        """No maps_to.db available -> refuse rather than write an unqueryable row."""
+        planned = self.plan_one(base_record(concept_id=self.NON_STANDARD, value={}))
+        self.assertIs(planned.disposition, Disposition.NOTE_NLP_ONLY)
+        self.assertIs(planned.reason, Reason.NO_STANDARD_MAPPING)
+        self.assertIn("invisible to cohort SQL", planned.detail)
+
+    def test_subsumes_only_relationship_db_is_treated_as_absent(self) -> None:
+        """CP's concept_relationship.db has only 'Subsumes' — must not look usable."""
+        subsumes_only = Path(self.tmp.name) / "concept_relationship.db"
+        rel = sqlite3.connect(subsumes_only)
+        rel.execute(
+            """CREATE TABLE concept_relationship (
+                   concept_id_1 INTEGER, concept_id_2 INTEGER,
+                   relationship_id TEXT, invalid_reason TEXT)"""
+        )
+        rel.execute("INSERT INTO concept_relationship VALUES (1,2,'Subsumes',NULL)")
+        rel.commit()
+        rel.close()
+        lookup = VocabLookup(self.vocab_path, subsumes_only)
+        self.assertFalse(lookup.has_relationships)
+        self.assertIn("no 'Maps to' rows", lookup.relationship_warning)
+        lookup.close()
 
 
 class TestOmopSourcedEvidenceIsRefused(WriterTestBase):

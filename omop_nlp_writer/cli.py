@@ -26,6 +26,7 @@ from .writer import CdmNlpWriter, Disposition, LoadReport, Reason
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CDM = ROOT / "build" / "cdm.db"
 DEFAULT_VOCAB = ROOT / "build" / "vocab.db"
+DEFAULT_MAPS_TO = ROOT / "vocab" / "maps_to.db"
 DEFAULT_VOCAB_CSV = ROOT / "fixtures" / "vocab_mini.csv"
 DEFAULT_NOTES = ROOT / "fixtures" / "notes" / "notes.json"
 DEFAULT_CHART_REVIEW = ROOT / "fixtures" / "chart_review_output"
@@ -164,8 +165,13 @@ def cmd_load(args: argparse.Namespace) -> int:
         print(f"[load] warn: {w}")
 
     with CdmNlpWriter(
-        args.cdm, args.vocab, confidence_threshold=args.min_confidence
+        args.cdm,
+        args.vocab,
+        confidence_threshold=args.min_confidence,
+        relationship_path=args.maps_to,
     ) as writer:
+        if writer.vocab.relationship_warning:
+            print(f"[load] warn: {writer.vocab.relationship_warning}")
         report = writer.plan(records)
         _print_report(report, dry_run=not args.commit)
         if args.commit:
@@ -227,7 +233,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
 
 
 def cmd_unload(args: argparse.Namespace) -> int:
-    with CdmNlpWriter(args.cdm, args.vocab) as writer:
+    with CdmNlpWriter(args.cdm, args.vocab, relationship_path=args.maps_to) as writer:
         deleted = writer.unload(nlp_system=args.nlp_system)
     if not deleted:
         print("[unload] nothing to remove")
@@ -312,6 +318,9 @@ def build_parser() -> argparse.ArgumentParser:
     def add_common(sp: argparse.ArgumentParser) -> None:
         sp.add_argument("--cdm", type=Path, default=DEFAULT_CDM, help="CDM SQLite path")
         sp.add_argument("--vocab", type=Path, default=DEFAULT_VOCAB, help="concept.db path")
+        sp.add_argument("--maps-to", type=Path, default=None,
+                        help="relationship DB with 'Maps to' rows; defaults to a "
+                             "maps_to.db sibling of --vocab")
 
     bv = sub.add_parser("build-vocab", help="build the synthetic dev vocabulary")
     bv.add_argument("--csv", type=Path, default=DEFAULT_VOCAB_CSV)
