@@ -67,8 +67,8 @@ def build_records(
                 if resolved is None:
                     warnings.append(
                         f"{cn!r} (entity_type {et}) is not in the registered "
-                        f"vocabulary — run register-vocab, or it is a new "
-                        f"novel_candidate not yet promoted into the ontology"
+                        f"vocabulary — register it with concept-normalizer, or it is a "
+                        f"new novel_candidate not yet promoted into the ontology"
                     )
                 else:
                     partial["concept_id"] = resolved

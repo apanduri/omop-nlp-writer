@@ -28,7 +28,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from omop_nlp_writer.register import stable_concept_id  # noqa: E402
+
+
+# Mirrors concept-normalizer's stable_concept_id. Duplicated in this demo script
+# so the writer's repo does not depend on the normalizer package just to compute a
+# concept id it already has in the registry.
+def stable_concept_id(source_key: str, vocabulary_id: str) -> int:
+    import hashlib
+
+    digest = hashlib.sha256(f"{vocabulary_id}|{source_key}".encode()).digest()
+    return 2_000_000_000 + (int.from_bytes(digest[:8], "big") % 100_000_000)
+
 
 VOCAB_DDL = """
 CREATE TABLE IF NOT EXISTS concept (

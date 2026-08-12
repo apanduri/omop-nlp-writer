@@ -25,7 +25,9 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-# Kept local to avoid a circular import with register.py.
+# The OHDSI-reserved range for local concepts. Duplicated deliberately: this
+# module only READS custom concepts, so it must not depend on the normalizer
+# package that writes them.
 CUSTOM_ID_BASE = 2_000_000_000
 
 CONCEPT_DDL = """

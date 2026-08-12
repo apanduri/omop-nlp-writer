@@ -1,7 +1,6 @@
 """CLI: python -m omop_nlp_writer <command>
 
     build-vocab   build the synthetic dev vocabulary (or verify a real one)
-    register-vocab register a source ontology as OMOP custom concepts
     init-cdm      create the CDM 5.4 subset and load synthetic PERSON/NOTE rows
     records       join the two pipelines' outputs into ExtractionRecords
     load          write NOTE_NLP + domain rows      (--dry-run by default)
@@ -21,10 +20,6 @@ from .adapters import build_records, records_to_json
 from .cdm import connect, init_schema
 from .domains import DOMAIN_TARGETS, NLP_ID_BASE, NLP_TYPE_CONCEPT_ID
 from .record import ContractError, load_records
-from .register import (
-    VocabularyRegistrar,
-    load_bso_ad,
-)
 from .vocab import VocabLookup, build_from_csv
 from .writer import CdmNlpWriter, Disposition, LoadReport, Reason
 
@@ -32,8 +27,6 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CDM = ROOT / "build" / "cdm.db"
 DEFAULT_VOCAB = ROOT / "build" / "vocab.db"
 DEFAULT_MAPS_TO = ROOT / "vocab" / "maps_to.db"
-DEFAULT_REGISTRY = ROOT / "vocab" / "custom_vocab.db"
-DEFAULT_COVERAGE = ROOT / "build" / "bso_ad_coverage.csv"
 DEFAULT_VOCAB_CSV = ROOT / "fixtures" / "vocab_mini.csv"
 DEFAULT_NOTES = ROOT / "fixtures" / "notes" / "notes.json"
 DEFAULT_CHART_REVIEW = ROOT / "fixtures" / "chart_review_output"
@@ -210,81 +203,6 @@ def cmd_load(args: argparse.Namespace) -> int:
 AUTO_MAP_DOMAINS = frozenset({"Observation", "Condition", "Measurement"})
 
 
-def _mappings_from_coverage(path: Path, include_ambiguous: bool) -> tuple[dict, dict]:
-    """Read the coverage CSV into source_key -> (omop concept_id, domain, origin).
-
-    Only `clean_match` rows landing in AUTO_MAP_DOMAINS are used.  `ambiguous`
-    and `near_match_needs_review` rows are candidates a human must confirm — the
-    coverage report showed partial matches are usually the WRONG concept
-    ("Diet" -> "tolerating diet"), so promoting them automatically would bake in
-    bad mappings nothing downstream can detect.
-    """
-    import csv as _csv
-
-    out: dict[str, tuple[int, str, str]] = {}
-    skipped: dict[str, int] = {}
-    with path.open(newline="") as fh:
-        for row in _csv.DictReader(fh):
-            status = row["status"]
-            key = f"{row['subtree']}|{row['label']}"
-            if status == "clean_match":
-                if row["domain_id"] in AUTO_MAP_DOMAINS:
-                    out[key] = (int(row["concept_id"]), row["domain_id"],
-                                "coverage:clean_match")
-                else:
-                    skipped["clean_match_but_risky_domain"] = (
-                        skipped.get("clean_match_but_risky_domain", 0) + 1
-                    )
-            elif status == "ambiguous" and include_ambiguous:
-                out[key] = (int(row["concept_id"]), row["domain_id"],
-                            "coverage:ambiguous_UNREVIEWED")
-            else:
-                skipped[status] = skipped.get(status, 0) + 1
-    return out, skipped
-
-
-def cmd_register_vocab(args: argparse.Namespace) -> int:
-    concepts = load_bso_ad(args.ontology)
-    print(f"[register] {len(concepts)} concepts from {args.ontology.name}")
-
-    mappings, skipped = ({}, {})
-    if args.mappings_from_coverage:
-        if not args.mappings_from_coverage.exists():
-            print(f"error: coverage file not found: {args.mappings_from_coverage}",
-                  file=sys.stderr)
-            return 2
-        mappings, skipped = _mappings_from_coverage(
-            args.mappings_from_coverage, args.include_ambiguous
-        )
-        print(f"[register] {len(mappings)} OMOP mappings loaded from coverage")
-        for status, n in sorted(skipped.items()):
-            print(f"[register]   not mapped ({status}): {n}")
-
-    with VocabularyRegistrar(args.registry, vocabulary_id=args.vocabulary_id) as reg:
-        report = reg.register(
-            concepts, mappings=mappings, commit=args.commit, now=args.now or ""
-        )
-
-    print(f"\n{'=' * 70}")
-    print(f"vocabulary  : {report.vocabulary_id}   registry: {args.registry}")
-    print(f"new concepts: {len(report.inserted)}")
-    print(f"already there: {len(report.unchanged)}")
-    print(f"ancestor rows: {report.ancestor_rows}   'Maps to' rows: {report.maps_to_rows}")
-    if report.id_collisions:
-        print(f"!! id collisions: {report.id_collisions}")
-
-    print("\nDomain assignment:")
-    for domain, n in sorted(report.domain_counts.items(), key=lambda kv: -kv[1]):
-        print(f"  {domain:<16} {n:>5}")
-    print("\nDecided by:")
-    for src, n in sorted(report.domain_source_counts.items(), key=lambda kv: -kv[1]):
-        print(f"  {src:<24} {n:>5}")
-
-    if report.dry_run:
-        print("\n[register] DRY RUN — nothing written. Re-run with --commit.")
-    else:
-        print(f"\n[register] committed to {args.registry}")
-    return 0
 
 def cmd_verify(args: argparse.Namespace) -> int:
     conn = connect(args.cdm)
@@ -456,20 +374,6 @@ def build_parser() -> argparse.ArgumentParser:
     ld.add_argument("--commit", action="store_true",
                     help="actually insert; omit for a dry run")
     ld.set_defaults(func=cmd_load)
-
-    rv = sub.add_parser("register-vocab",
-                        help="register a source ontology as OMOP custom concepts")
-    rv.add_argument("--ontology", type=Path, required=True,
-                    help="BSO-AD concepts.json")
-    rv.add_argument("--registry", type=Path, default=DEFAULT_REGISTRY)
-    rv.add_argument("--vocabulary-id", default="BSO-AD")
-    rv.add_argument("--mappings-from-coverage", type=Path, default=DEFAULT_COVERAGE,
-                    help="coverage CSV to take OMOP 'Maps to' targets from")
-    rv.add_argument("--include-ambiguous", action="store_true",
-                    help="also map ambiguous matches (UNREVIEWED — not recommended)")
-    rv.add_argument("--now", default="", help="timestamp to stamp rows with")
-    rv.add_argument("--commit", action="store_true")
-    rv.set_defaults(func=cmd_register_vocab)
 
     vf = sub.add_parser("verify", help="report CDM contents by provenance")
     vf.add_argument("--cdm", type=Path, default=DEFAULT_CDM)

@@ -21,7 +21,7 @@ infrastructure and no dependencies.
 
 ```bash
 make demo      # fixtures -> vocab -> CDM -> records -> dry-run -> load -> verify
-make test      # 23 tests
+make test      # 36 tests
 ```
 
 Or step by step:
@@ -47,7 +47,7 @@ OK   note 1001 @130-134    'MMSE'
         person_id                        = 1
         observation_concept_id           = 42869861
         observation_date                 = 2025-03-14
-        observation_type_concept_id      = 32468  <-- NLP provenance
+        observation_type_concept_id      = 32858  <-- NLP provenance
         observation_source_value         = MMSE
         value_as_number                  = 22.0
 ```
@@ -59,7 +59,7 @@ OK   note 1001 @130-134    'MMSE'
 | [CONTRACT.md](CONTRACT.md) | **The input contract.** The one thing both pipelines must meet |
 | [INTEGRATION-OPTIONS.md](INTEGRATION-OPTIONS.md) | How the 3 repos could be wired together — for the meeting |
 | `omop_nlp_writer/record.py` | `ExtractionRecord` + validation |
-| `omop_nlp_writer/vocab.py` | `concept_id` → `domain_id`, schema-identical to CP's `concept.db` |
+| `omop_nlp_writer/vocab.py` | `concept_id` → `domain_id`; also reads custom concepts read-only |
 | `omop_nlp_writer/domains.py` | Domain → CDM table routing, provenance constants |
 | `omop_nlp_writer/cdm.py` | CDM 5.4 subset DDL + the NLP ledger |
 | `omop_nlp_writer/writer.py` | `plan()` / `execute()` — the core |
@@ -154,7 +154,7 @@ OHDSI-generated cohort SQL.
 
 ```
 BSO-AD NER output          (Behavior_and_Lifestyle, Treadmill)
-  -> register-vocab        custom concept 2030233672, Observation domain
+  -> concept-normalizer    custom concept 2030233672, Observation domain
   -> load                  OBSERVATION row, type_concept_id 32858 (NLP)
   -> CirceR                cohort SQL for "Exercise equipment + descendants"
   -> run                   person_id=2 (SYNTH-002) 2025-04-02 .. 2026-12-31
@@ -180,6 +180,15 @@ readable, and what Postgres wants — so date comparisons silently match nothing
 the cohort returns zero rows with no error. `run` therefore executes against an
 epoch-converted copy rather than patching the generated SQL, so what runs is what
 OHDSI tooling would run. A Postgres CDM never hits this.
+
+## Related projects
+
+Normalization — turning extracted text into a concept, and registering an
+ontology as OMOP custom concepts — lives in
+[concept-normalizer](https://github.com/apanduri/concept-normalizer). This writer
+only *reads* the registry it produces (`vocab/custom_vocab.db`), so the dependency
+is one-way: nothing about the CDM belongs in the normalizer, and nothing about
+matching or vocabulary authoring belongs here.
 
 ## Synthetic data only
 
