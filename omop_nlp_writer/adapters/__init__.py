@@ -11,7 +11,54 @@ from pathlib import Path
 from typing import Any
 
 from ..record import ExtractionRecord
-from . import chart_review, normalizer
+from . import acts, chart_review, normalizer
+
+
+def build_acts_records(
+    acts_path: Path,
+    normalizer: object | None = None,
+) -> tuple[list[ExtractionRecord], list[str]]:
+    """ACTS rubric output -> ExtractionRecords, resolving each field's concept.
+
+    `normalizer` is a NormalizerClient. Without one, records still come through
+    carrying no concept — they land in NOTE_NLP as evidence rather than being
+    dropped, which is the same degradation as a missing normalizer anywhere else.
+    """
+    warnings: list[str] = []
+    records: list[ExtractionRecord] = []
+    seen_terms: dict[str, str] = {}
+
+    for partial in acts.read_answers(acts_path):
+        term = partial.pop("source_term")
+        field_id = partial.pop("acts_field_id")
+
+        if normalizer is not None:
+            resolved = normalizer.resolve(term)
+            partial["concept_id"] = resolved.concept_id
+            if resolved.concept_id is None and term not in seen_terms:
+                # Report once per field, not once per answer: a 29-field rubric
+                # over many notes would otherwise bury the signal.
+                seen_terms[term] = resolved.status
+                if resolved.is_reviewed_nonmapping:
+                    warnings.append(
+                        f"{field_id}: reviewed as having no suitable concept "
+                        f"({resolved.detail}) — evidence only, by decision"
+                    )
+                else:
+                    warnings.append(
+                        f"{field_id}: not resolved ({resolved.status}: "
+                        f"{resolved.detail}) — evidence only"
+                    )
+        elif term not in seen_terms:
+            seen_terms[term] = "no-normalizer"
+            warnings.append(
+                f"{field_id}: no normalizer available — evidence only"
+            )
+
+        partial["record_id"] = f"{partial['record_id']}:{partial.get('concept_id') or 0}"
+        records.append(ExtractionRecord.from_dict(partial))
+
+    return records, warnings
 
 
 def build_records(
@@ -131,4 +178,5 @@ def records_to_json(records: list[ExtractionRecord]) -> list[dict[str, Any]]:
     return out
 
 
-__all__ = ["build_records", "records_to_json", "chart_review", "normalizer"]
+__all__ = ["acts", "build_acts_records", "build_records", "records_to_json",
+           "chart_review", "normalizer"]

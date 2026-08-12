@@ -21,7 +21,7 @@ infrastructure and no dependencies.
 
 ```bash
 make demo      # fixtures -> vocab -> CDM -> records -> dry-run -> load -> verify
-make test      # 36 tests
+make test      # 62 tests
 ```
 
 Or step by step:
@@ -63,7 +63,8 @@ OK   note 1001 @130-134    'MMSE'
 | `omop_nlp_writer/domains.py` | Domain → CDM table routing, provenance constants |
 | `omop_nlp_writer/cdm.py` | CDM 5.4 subset DDL + the NLP ledger |
 | `omop_nlp_writer/writer.py` | `plan()` / `execute()` — the core |
-| `omop_nlp_writer/adapters/` | One file per upstream pipeline; the only format-specific code |
+| `omop_nlp_writer/adapters/` | One file per upstream format (`acts.py`, `chart_review.py`) |
+| `omop_nlp_writer/normalizer_client.py` | Calls concept-normalizer; optional and lazily imported |
 | `fixtures/` | Dummy output for both pipelines + synthetic notes |
 | `scripts/make_fixtures.py` | Regenerates all fixtures; offsets computed from note text |
 
@@ -180,6 +181,42 @@ readable, and what Postgres wants — so date comparisons silently match nothing
 the cohort returns zero rows with no error. `run` therefore executes against an
 epoch-converted copy rather than patching the generated SQL, so what runs is what
 OHDSI tooling would run. A Postgres CDM never hits this.
+
+## ACTS: rubric output
+
+ACTS answers 29 typed questions per patient rather than tagging spans, so the
+concept comes from the **field** and the value from the **answer**:
+
+```bash
+python3 -m omop_nlp_writer load --vocab vocab/concept.db --acts --commit
+```
+
+```
+[load] normalizer: target=OMOP, AliasTable('acts', 13 mapped, 9 deliberate non-mappings)
+
+OK   note 1001 @130-140    'MMSE 22/30'
+      domain      : Measurement -> MEASUREMENT
+        measurement_concept_id           = 4169175
+        value_as_number                  = 22.0
+        measurement_type_concept_id      = 32858  <-- NLP provenance
+```
+
+The answer's **type** decides which value column it lands in, and each type is
+handled explicitly rather than generically, because the generic version fails in
+ways nothing would report:
+
+| Answer type | Goes to | Why it needs care |
+|---|---|---|
+| score (`mmse_score: 22`) | `value_as_number` | |
+| numeric enum (`cdr_global: 0.5`) | `value_as_number` | it is a score, not a label |
+| boolean (`impaired_cognition: 0`) | **no domain row** | `0` means NOT impaired — recording it as a fact would fabricate a diagnosis |
+| category (`smoking_status: former`) | `value_as_string` | needs an answer-level concept for `value_as_concept_id`; carried visibly until then |
+| date (`lmp_date: "around 1998"`) | `value_as_string` | OMOP has no date-valued column — modelling decision pending |
+| list (`allergen: [...]`) | `value_as_string` | each element needs its own concept |
+
+Also skipped: the 7 fields the rubric **computes** from another (`mmse_severity`
+from `mmse_score`, `apoe4` from `apoe_genotype`) — inserting both would record the
+same fact twice.
 
 ## Related projects
 

@@ -16,7 +16,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from .adapters import build_records, records_to_json
+from .adapters import build_acts_records, build_records, records_to_json
 from .cdm import connect, init_schema
 from .domains import DOMAIN_TARGETS, NLP_ID_BASE, NLP_TYPE_CONCEPT_ID
 from .record import ContractError, load_records
@@ -31,6 +31,7 @@ DEFAULT_VOCAB_CSV = ROOT / "fixtures" / "vocab_mini.csv"
 DEFAULT_NOTES = ROOT / "fixtures" / "notes" / "notes.json"
 DEFAULT_CHART_REVIEW = ROOT / "fixtures" / "chart_review_output"
 DEFAULT_NORMALIZER = ROOT / "fixtures" / "normalizer_output"
+DEFAULT_ACTS = ROOT / "fixtures" / "acts_output"
 
 EHR_TYPE_CONCEPT_ID = 32817  # "EHR" — used only to seed comparison rows
 
@@ -150,8 +151,35 @@ def cmd_records(args: argparse.Namespace) -> int:
     return 0
 
 
+def _normalizer(args: argparse.Namespace):
+    """Open a NormalizerClient, or explain why we are proceeding without one."""
+    from .normalizer_client import NormalizerClient, NormalizerUnavailable
+
+    try:
+        client = NormalizerClient(
+            args.vocab,
+            target=args.target,
+            alias_table=args.alias_table,
+            package_path=args.normalizer_path,
+        )
+    except NormalizerUnavailable as exc:
+        print(f"[load] warn: {exc}")
+        print("[load] warn: proceeding without normalization — records carrying no "
+              "concept_id will be evidence only")
+        return None
+    print(f"[load] normalizer: target={args.target}, {client.alias_summary}")
+    return client
+
+
 def cmd_load(args: argparse.Namespace) -> int:
-    if args.extractions:
+    if args.acts:
+        client = _normalizer(args)
+        try:
+            records, warnings = build_acts_records(args.acts, normalizer=client)
+        finally:
+            if client:
+                client.close()
+    elif args.extractions:
         try:
             records = load_records(args.extractions)
         except ContractError as exc:
@@ -173,7 +201,7 @@ def cmd_load(args: argparse.Namespace) -> int:
     ) as writer:
         if writer.vocab.relationship_warning:
             print(f"[load] warn: {writer.vocab.relationship_warning}")
-        if not args.extractions and writer.vocab.has_custom_registry:
+        if not args.extractions and not args.acts and writer.vocab.has_custom_registry:
             # Re-resolve now that the registry is open: entities carrying a
             # BSO-AD (entity_type, concept_name) pair get a concept_id.
             records, extra = build_records(
@@ -362,6 +390,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     ld = sub.add_parser("load", help="write NOTE_NLP + domain rows")
     add_common(ld)
+    ld.add_argument("--acts", type=Path, nargs="?", const=DEFAULT_ACTS,
+                    help="ACTS rubric output (field/value answers); resolves each "
+                         "field's concept through concept-normalizer")
+    ld.add_argument("--target", default="OMOP",
+                    help="target vocabulary passed to the normalizer")
+    ld.add_argument("--alias-table", default="acts",
+                    help="reviewed alias table name or path (default: acts)")
+    ld.add_argument("--normalizer-path", type=Path,
+                    help="path to a concept-normalizer checkout")
     ld.add_argument("--extractions", type=Path,
                     help="ExtractionRecord JSON (file or dir); skips the adapters")
     ld.add_argument("--chart-review", type=Path, default=DEFAULT_CHART_REVIEW)
