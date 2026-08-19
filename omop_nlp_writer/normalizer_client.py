@@ -50,11 +50,15 @@ class NormalizerClient:
         *,
         target: str = "OMOP",
         alias_table: str | Path | None = None,
+        value_alias_table: str | Path | None = None,
+        unit_alias_table: str | Path | None = None,
         package_path: Path | None = None,
     ):
         self.vocab_path = vocab_path
         self.target_name = target
         self._cache: dict[str, Resolved] = {}
+        self._value_cache: dict[str, Resolved] = {}
+        self._unit_cache: dict[str, Resolved] = {}
 
         try:
             import concept_normalizer  # noqa: F401
@@ -89,13 +93,27 @@ class NormalizerClient:
             vocabs = tuple(v.strip() for v in target.split(",") if v.strip())
         self._target = OmopVocabulary(vocab_path, vocabulary_ids=vocabs)
 
-        self._aliases = None
-        if alias_table:
-            as_path = Path(alias_table)
-            self._aliases = (
-                alias_mod.load(as_path) if as_path.exists()
-                else alias_mod.load_builtin(str(alias_table))
-            )
+        def _table(spec):
+            if not spec:
+                return None
+            p = Path(spec)
+            return alias_mod.load(p) if p.exists() else alias_mod.load_builtin(str(spec))
+
+        self._aliases = _table(alias_table)
+        self._value_aliases = _table(value_alias_table)
+        self._unit_aliases = _table(unit_alias_table)
+
+        # Values and units live in DIFFERENT OMOP domains from events. The concept
+        # for "smoking status" is an Observation; the concept for "Former smoker"
+        # is a Meas Value, which is what value_as_concept_id points at. Searching
+        # the event domains for a value finds nothing at all, so each needs its own
+        # target. Built lazily — most loads never need them.
+        from concept_normalizer import unit_target, value_target
+
+        self._value_target_factory = lambda: value_target(vocab_path)
+        self._unit_target_factory = lambda: unit_target(vocab_path)
+        self._value_target = None
+        self._unit_target = None
 
         from concept_normalizer import normalize
 
@@ -117,7 +135,49 @@ class NormalizerClient:
         self._cache[term] = resolved
         return resolved
 
+    def resolve_value(self, field_id: str, answer: object) -> Resolved:
+        """A categorical ANSWER -> a value concept for value_as_concept_id.
+
+        Keyed "<field_id>.<answer>" because the same answer text means different
+        things under different fields ("former" under smoking_status is not
+        "former" under anything else).
+        """
+        key = f"{field_id}.{str(answer).strip().lower()}"
+        if key in self._value_cache:
+            return self._value_cache[key]
+        if self._value_target is None:
+            self._value_target = self._value_target_factory()
+        result = self._normalize(key, self._value_target, aliases=self._value_aliases)
+        if result.concept is None and self._value_aliases is not None:
+            # No entry under the compound key: fall back to searching the answer
+            # text itself in the value domains ("Former smoker" is findable).
+            if self._value_aliases.get(key) is None:
+                result = self._normalize(str(answer), self._value_target)
+        resolved = Resolved(
+            concept_id=result.concept.concept_id if result.concept else None,
+            status=result.status.value,
+            detail=result.detail,
+        )
+        self._value_cache[key] = resolved
+        return resolved
+
+    def resolve_unit(self, field_id: str) -> Resolved:
+        """A field's unit -> a unit concept for unit_concept_id."""
+        if field_id in self._unit_cache:
+            return self._unit_cache[field_id]
+        if self._unit_target is None:
+            self._unit_target = self._unit_target_factory()
+        result = self._normalize(field_id, self._unit_target, aliases=self._unit_aliases)
+        resolved = Resolved(
+            concept_id=result.concept.concept_id if result.concept else None,
+            status=result.status.value,
+            detail=result.detail,
+        )
+        self._unit_cache[field_id] = resolved
+        return resolved
+
     def close(self) -> None:
-        close = getattr(self._target, "close", None)
-        if close:
-            close()
+        for target in (self._target, self._value_target, self._unit_target):
+            close = getattr(target, "close", None)
+            if close:
+                close()

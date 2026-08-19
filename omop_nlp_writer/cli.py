@@ -160,6 +160,8 @@ def _normalizer(args: argparse.Namespace):
             args.vocab,
             target=args.target,
             alias_table=args.alias_table,
+            value_alias_table=args.value_alias_table,
+            unit_alias_table=args.unit_alias_table,
             package_path=args.normalizer_path,
         )
     except NormalizerUnavailable as exc:
@@ -397,6 +399,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="target vocabulary passed to the normalizer")
     ld.add_argument("--alias-table", default="acts",
                     help="reviewed alias table name or path (default: acts)")
+    ld.add_argument("--value-alias-table", default="acts_values",
+                    help="alias table for categorical ANSWERS -> value_as_concept_id")
+    ld.add_argument("--unit-alias-table", default="acts_units",
+                    help="alias table for field units -> unit_concept_id")
     ld.add_argument("--normalizer-path", type=Path,
                     help="path to a concept-normalizer checkout")
     ld.add_argument("--extractions", type=Path,

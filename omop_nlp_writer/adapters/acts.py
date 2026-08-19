@@ -145,6 +145,7 @@ def read_answers(path: Path) -> Iterator[dict[str, Any]]:
                     "term_temporal": answer.get("temporality"),
                     "term_modifiers": _modifiers(field_id, raw, answer, notes),
                     "value": value,
+                    "raw_answer": raw,
                     "concept_confidence": CONFIDENCE.get(
                         str(answer.get("confidence", "")).lower()
                     ),
@@ -201,9 +202,9 @@ def _typed_value(field_id: str, raw: Any) -> tuple[dict[str, Any], bool, str]:
                 "decision pending")
 
     if field_id in CATEGORICAL_FIELDS:
-        return ({"as_string": str(raw)}, True,
-                "categorical answer; needs an answer-level concept mapping for "
-                "value_as_concept_id")
+        # The string is kept as value_source_value regardless; build_acts_records
+        # adds value_as_concept_id when the value itself normalizes.
+        return {"as_string": str(raw)}, True, ""
 
     if field_id in LIST_FIELDS:
         return ({"as_string": ", ".join(map(str, raw)) if isinstance(raw, list)

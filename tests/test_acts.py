@@ -63,11 +63,12 @@ class TestValueTyping(ActsTestBase):
             (r,) = self.read(answer(field, value))
             self.assertEqual(r["value"]["as_number"], float(value), field)
 
-    def test_categorical_answer_is_a_string_and_says_why(self) -> None:
+    def test_categorical_answer_is_carried_as_a_string(self) -> None:
+        """The string is value_source_value; build_acts_records adds the concept."""
         (r,) = self.read(answer("smoking_status", "former"))
         self.assertEqual(r["value"]["as_string"], "former")
         self.assertIsNone(r["value"].get("as_number"))
-        self.assertIn("answer-level concept mapping", r["term_modifiers"])
+        self.assertEqual(r["raw_answer"], "former")
 
     def test_date_answer_is_not_coerced_into_a_number(self) -> None:
         (r,) = self.read(answer("lmp_date", "around 1998"))
@@ -193,6 +194,16 @@ class FakeNormalizer:
             return Resolved(self.mapping[term], "mapped", "reviewed alias")
         return Resolved(None, "unmapped", "no exact name match")
 
+    def resolve_value(self, field_id: str, answer: object):
+        from omop_nlp_writer.normalizer_client import Resolved
+
+        return Resolved(None, "unmapped", "no value concept")
+
+    def resolve_unit(self, field_id: str):
+        from omop_nlp_writer.normalizer_client import Resolved
+
+        return Resolved(None, "not_in_target", "unitless")
+
 
 class TestNormalizerIntegration(ActsTestBase):
     def write(self, *answers: dict) -> Path:
@@ -259,3 +270,94 @@ class TestNormalizerIntegration(ActsTestBase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestValueAndUnitConcepts(ActsTestBase):
+    """OMOP represents values and units as concepts too, not just as text.
+
+    Without value_as_concept_id a categorical answer is stored but unqueryable —
+    a cohort query for former smokers cannot filter on the string "former".
+    """
+
+    class Norm(FakeNormalizer):
+        def __init__(self, values=None, units=None, **kw):
+            super().__init__(**kw)
+            self.values = values or {}
+            self.units = units or {}
+            self.value_calls: list[str] = []
+
+        def resolve_value(self, field_id, answer):
+            from omop_nlp_writer.normalizer_client import Resolved
+
+            key = f"{field_id}.{str(answer).strip().lower()}"
+            self.value_calls.append(key)
+            if key in self.values:
+                return Resolved(self.values[key], "mapped", "reviewed alias")
+            return Resolved(None, "unmapped", "no value concept")
+
+        def resolve_unit(self, field_id):
+            from omop_nlp_writer.normalizer_client import Resolved
+
+            if field_id in self.units:
+                return Resolved(self.units[field_id], "mapped", "reviewed alias")
+            return Resolved(None, "not_in_target", "unitless")
+
+    def write(self, *answers: dict) -> Path:
+        d = Path(self.tmp.name) / "acts"
+        d.mkdir(exist_ok=True)
+        (d / "note.json").write_text(json.dumps(doc(*answers)))
+        return d
+
+    def test_categorical_value_gets_value_as_concept_id(self) -> None:
+        norm = self.Norm(mapping={"smoking_status": 43054909},
+                         values={"smoking_status.former": 45883458})
+        records, _ = build_acts_records(
+            self.write(answer("smoking_status", "former")), normalizer=norm
+        )
+        self.assertEqual(records[0].value.as_concept_id, 45883458)
+
+    def test_the_string_is_kept_as_well_for_value_source_value(self) -> None:
+        """The concept drives queries; the original text stays auditable."""
+        norm = self.Norm(mapping={"smoking_status": 43054909},
+                         values={"smoking_status.former": 45883458})
+        records, _ = build_acts_records(
+            self.write(answer("smoking_status", "former")), normalizer=norm
+        )
+        self.assertEqual(records[0].value.as_string, "former")
+
+    def test_value_key_includes_the_field(self) -> None:
+        """'former' under smoking_status is not 'former' under anything else."""
+        norm = self.Norm(mapping={}, values={})
+        build_acts_records(self.write(answer("smoking_status", "former")), normalizer=norm)
+        self.assertEqual(norm.value_calls, ["smoking_status.former"])
+
+    def test_unmappable_value_is_reported_as_unqueryable(self) -> None:
+        norm = self.Norm(mapping={"apoe_genotype": 37397776}, values={})
+        _, warnings = build_acts_records(
+            self.write(answer("apoe_genotype", "e3/e4")), normalizer=norm
+        )
+        self.assertIsNotNone(warnings)
+        self.assertTrue(any("cannot filter on the value" in w for w in warnings))
+
+    def test_numeric_field_with_a_unit_gets_unit_concept_id(self) -> None:
+        norm = self.Norm(mapping={"education_years": 42528763}, units={"education_years": 9448})
+        records, _ = build_acts_records(
+            self.write(answer("education_years", 16)), normalizer=norm
+        )
+        self.assertEqual(records[0].value.unit_concept_id, 9448)
+        self.assertEqual(records[0].value.as_number, 16.0)
+
+    def test_unitless_score_gets_no_unit(self) -> None:
+        """An MMSE of 22 is not 22 of anything."""
+        norm = self.Norm(mapping={"mmse_score": 4169175}, units={})
+        records, _ = build_acts_records(
+            self.write(answer("mmse_score", 22)), normalizer=norm
+        )
+        self.assertIsNone(records[0].value.unit_concept_id)
+
+    def test_no_unit_lookup_for_a_non_numeric_answer(self) -> None:
+        norm = self.Norm(mapping={"smoking_status": 43054909}, units={"smoking_status": 9448})
+        records, _ = build_acts_records(
+            self.write(answer("smoking_status", "former")), normalizer=norm
+        )
+        self.assertIsNone(records[0].value.unit_concept_id)

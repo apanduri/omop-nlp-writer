@@ -31,8 +31,14 @@ def build_acts_records(
     for partial in acts.read_answers(acts_path):
         term = partial.pop("source_term")
         field_id = partial.pop("acts_field_id")
+        raw_answer = partial.pop("raw_answer", None)
 
-        if normalizer is not None:
+        if normalizer is None:
+            if term not in seen_terms:
+                seen_terms[term] = "no-normalizer"
+                warnings.append(f"{field_id}: no normalizer available — evidence only")
+        else:
+            # 1. the FIELD -> the event concept
             resolved = normalizer.resolve(term)
             partial["concept_id"] = resolved.concept_id
             if resolved.concept_id is None and term not in seen_terms:
@@ -49,11 +55,31 @@ def build_acts_records(
                         f"{field_id}: not resolved ({resolved.status}: "
                         f"{resolved.detail}) — evidence only"
                     )
-        elif term not in seen_terms:
-            seen_terms[term] = "no-normalizer"
-            warnings.append(
-                f"{field_id}: no normalizer available — evidence only"
-            )
+
+            # 2. the ANSWER -> a value concept. OMOP represents categorical values
+            # as concepts too, so a value that normalizes gets value_as_concept_id
+            # and not merely a string. The string stays as value_source_value, which
+            # is what that column is for. Without this a query cannot filter on the
+            # value at all.
+            if partial["value"].get("as_string") is not None and raw_answer is not None:
+                value_res = normalizer.resolve_value(field_id, raw_answer)
+                if value_res.concept_id is not None:
+                    partial["value"]["as_concept_id"] = value_res.concept_id
+                else:
+                    key = f"{field_id}.{raw_answer}"
+                    if key not in seen_terms:
+                        seen_terms[key] = value_res.status
+                        warnings.append(
+                            f"{field_id}={raw_answer!r}: no value concept "
+                            f"({value_res.status}) — value_source_value only, so a "
+                            f"query cannot filter on the value"
+                        )
+
+            # 3. the UNIT -> a unit concept, wherever OMOP has one.
+            if partial["value"].get("as_number") is not None:
+                unit_res = normalizer.resolve_unit(field_id)
+                if unit_res.concept_id is not None:
+                    partial["value"]["unit_concept_id"] = unit_res.concept_id
 
         partial["record_id"] = f"{partial['record_id']}:{partial.get('concept_id') or 0}"
         records.append(ExtractionRecord.from_dict(partial))
