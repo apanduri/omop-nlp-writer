@@ -11,6 +11,12 @@
       "gender_concept_id": 8507,
       "year_of_birth": 1941,
       "person_source_value": "SYNTH-002"
+    },
+    {
+      "person_id": "patient_fake_acts_01",
+      "gender_concept_id": 8532,
+      "year_of_birth": 1948,
+      "person_source_value": "patient_fake_acts_01"
     }
   ],
   "notes": [
@@ -37,6 +43,14 @@
       "note_datetime": "2025-05-02T11:00:00",
       "note_title": "Memory clinic interim",
       "note_text": "SYNTHETIC NOTE - NOT REAL PATIENT DATA.\nInterim call. Daughter reports she is tolerating donepezil well.\nRepeat MMSE 21/30 - broadly unchanged since March.\n"
+    },
+    {
+      "note_id": "2025-03-14__memory_clinic_md_op_progress_note.txt",
+      "person_id": "patient_fake_acts_01",
+      "note_date": "2025-03-14",
+      "note_datetime": "2025-03-14T09:20:00",
+      "note_title": "Memory clinic progress note",
+      "note_text": "SYNTHETIC NOTE - NOT REAL PATIENT DATA.\nCognition: MMSE 22/30. CDR 0.5.\n"
     }
   ]
 }

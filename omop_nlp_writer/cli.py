@@ -95,7 +95,9 @@ def cmd_init_cdm(args: argparse.Namespace) -> int:
                (observation_period_id, person_id, observation_period_start_date,
                 observation_period_end_date, period_type_concept_id)
                VALUES (?, ?, ?, ?, ?)""",
-            (p["person_id"], p["person_id"], "2015-01-01", "2026-12-31", EHR_TYPE_CONCEPT_ID),
+            # `key`, not the raw id: a string person_id would be a datatype
+            # mismatch against an INTEGER primary key.
+            (key, key, "2015-01-01", "2026-12-31", EHR_TYPE_CONCEPT_ID),
         )
 
     next_note_key = 1

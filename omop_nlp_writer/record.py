@@ -198,13 +198,25 @@ class ExtractionRecord:
 
     @property
     def event_date(self) -> str:
-        """Date to stamp on the domain row."""
+        """Date to stamp on the domain row, from the record alone."""
+        return self.event_date_or(None)
+
+    def event_date_or(self, fallback: str | None) -> str:
+        """Date for the domain row, falling back to the note's own date.
+
+        Rubric-style output (a per-patient review) carries no date at all, so the
+        NOTE row supplies it. Preferring the record's own date keeps span-based
+        extractions unchanged.
+        """
         if self.start_date:
             return self.start_date[:10]
         if self.note_datetime:
             return self.note_datetime[:10]
+        if fallback:
+            return str(fallback)[:10]
         raise ContractError(
-            f"{self.record_id}: needs start_date or note_datetime to date the domain row"
+            f"{self.record_id}: no start_date or note_datetime, and the resolved "
+            f"NOTE has no note_date either — nothing to date the domain row with"
         )
 
 

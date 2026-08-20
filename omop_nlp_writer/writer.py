@@ -178,6 +178,15 @@ class CdmNlpWriter:
                 ),
             )
 
+        # A note-derived fact is dated by its note. Rubric output carries no date
+        # of its own — it is patient-level — so the NOTE row is the source of
+        # truth rather than something to infer from a filename.
+        fallback_date = None
+        try:
+            fallback_date = note["note_date"]
+        except (IndexError, KeyError):
+            pass
+
         note_nlp_id = self._allocate("note_nlp", "note_nlp_id")
         note_nlp_row = self._build_note_nlp_row(record, note_nlp_id, resolved_note_id)
 
@@ -264,7 +273,8 @@ class CdmNlpWriter:
             target=target,
             domain_row_id=domain_row_id,
             domain_row=self._build_domain_row(
-                record, target, domain_row_id, resolved_person_id, resolution
+                record, target, domain_row_id, resolved_person_id, resolution,
+                fallback_date,
             ),
         )
 
@@ -279,10 +289,12 @@ class CdmNlpWriter:
         """
         if isinstance(note_ref, int):
             return self.conn.execute(
-                "SELECT note_id, person_id FROM note WHERE note_id = ?", (note_ref,)
+                "SELECT note_id, person_id, note_date, note_datetime FROM note "
+                "WHERE note_id = ?", (note_ref,)
             ).fetchone()
         return self.conn.execute(
-            "SELECT note_id, person_id FROM note WHERE note_source_value = ?", (note_ref,)
+            "SELECT note_id, person_id, note_date, note_datetime FROM note "
+            "WHERE note_source_value = ?", (note_ref,)
         ).fetchone()
 
     def _resolve_person(self, person_ref: int | str) -> int | None:
@@ -338,8 +350,9 @@ class CdmNlpWriter:
         row_id: int,
         resolved_person_id: int,
         resolution: Resolution,
+        fallback_date: str | None = None,
     ) -> dict[str, Any]:
-        event_date = record.event_date
+        event_date = record.event_date_or(fallback_date)
         assert resolution.standard is not None
         row: dict[str, Any] = {
             target.pk: row_id,

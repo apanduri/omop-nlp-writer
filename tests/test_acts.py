@@ -21,21 +21,44 @@ from omop_nlp_writer.adapters import acts, build_acts_records  # noqa: E402
 from omop_nlp_writer.adapters.acts import ActsFormatError  # noqa: E402
 
 
-def doc(*answers: dict) -> dict:
+NOTE = "2025-03-14__memory_clinic_md_op_progress_note.txt"
+PATIENT = "patient_fake_acts_01"
+
+
+def doc(*answers: dict, review_status: str = "reviewer_validated") -> dict:
+    """A review_state.json, per docs/ACTS_OUTPUT_FORMAT.md."""
     return {
-        "pipeline": "chart-review-platform",
+        "schema_version": "1",
+        "patient_id": PATIENT,
         "task_id": "acts",
-        "note_id": 1001,
-        "person_id": 1,
-        "note_datetime": "2025-03-14T09:20:00",
-        "answers": list(answers),
+        "task_version": "2026-06-23",
+        "review_status": review_status,
+        "version": 1,
+        "updated_at": "2026-07-21T14:40:03.232Z",
+        "updated_by": "sneha",
+        "field_assessments": list(answers),
     }
 
 
 def answer(field_id: str, value: object, **kw) -> dict:
-    ev = kw.pop("evidence", [{"source": "note", "span_offsets": [10, 20],
-                              "verbatim_quote": "quoted text"}])
-    return {"field_id": field_id, "answer": value, "evidence": ev, **kw}
+    """One field_assessments[] entry."""
+    ev = kw.pop("evidence", [{
+        "source": "note", "note_id": NOTE, "span_offsets": [10, 20],
+        "verbatim_quote": "quoted text", "doc_type": "progress note",
+        "author_role": "attending physician",
+    }])
+    return {
+        "field_id": field_id,
+        "answer": value,
+        "evidence": ev,
+        "rationale": "…",
+        "source": kw.pop("source", "reviewer"),
+        "status": kw.pop("status", "approved"),
+        "updated_at": "2026-07-21T14:39:10.919Z",
+        "updated_by": "sneha",
+        "captured_against_schema_hash": "0702d6bbe98b1a8e",
+        **kw,
+    }
 
 
 class ActsTestBase(unittest.TestCase):
@@ -59,7 +82,7 @@ class TestValueTyping(ActsTestBase):
 
     def test_numeric_enums_are_numbers_not_categories(self) -> None:
         """CDR global is 0/0.5/1/2/3 and GDS stage 1-7 — scores, not labels."""
-        for field, value in (("cdr_global", 0.5), ("gds_stage", 4)):
+        for field, value in (("cdr_global", "0.5"), ("gds_stage", "4")):
             (r,) = self.read(answer(field, value))
             self.assertEqual(r["value"]["as_number"], float(value), field)
 
@@ -82,22 +105,27 @@ class TestValueTyping(ActsTestBase):
         self.assertEqual(r["value"]["as_string"], "not recorded")
         self.assertIn("expected a number", r["term_modifiers"])
 
-    def test_list_answer_is_flagged_as_needing_per_element_concepts(self) -> None:
-        (r,) = self.read(answer("allergen", ["penicillin", "latex"]))
-        self.assertIn("penicillin", r["value"]["as_string"])
-        self.assertIn("own concept", r["term_modifiers"])
+    def test_entity_list_yields_one_record_per_element(self) -> None:
+        """OMOP puts the substance in the concept, so two allergens are two facts."""
+        rows = self.read(answer("allergen", [
+            {"Allergen": "penicillin", "Supporting_Evidence": "PCN rash"},
+            {"Allergen": "latex", "Supporting_Evidence": "latex reaction"},
+        ]))
+        self.assertEqual(len(rows), 2)
+        self.assertEqual({r["source_term"] for r in rows},
+                         {"allergen.penicillin", "allergen.latex"})
 
 
 class TestNegativeFindings(ActsTestBase):
     """The case where generic handling would fabricate a diagnosis."""
 
     def test_boolean_zero_becomes_a_negative_finding(self) -> None:
-        (r,) = self.read(answer("impaired_cognition", 0))
+        (r,) = self.read(answer("impaired_cognition", "0"))
         self.assertFalse(r["term_exists"], "0 must not become a positive fact")
         self.assertIn("negative finding", r["term_modifiers"])
 
     def test_boolean_one_is_a_positive_finding(self) -> None:
-        (r,) = self.read(answer("impaired_cognition", 1))
+        (r,) = self.read(answer("impaired_cognition", "1"))
         self.assertTrue(r["term_exists"])
 
     def test_string_booleans_are_understood(self) -> None:
@@ -114,8 +142,8 @@ class TestNegativeFindings(ActsTestBase):
 class TestSkipping(ActsTestBase):
     def test_computed_fields_are_not_inserted(self) -> None:
         """mmse_severity carries nothing mmse_score does not."""
-        rows = self.read(answer("mmse_score", 22), answer("mmse_severity", "mild"),
-                         answer("apoe4", 1))
+        rows = self.read(answer("mmse_score", 22), answer("mmse_severity", "mild", source="derived"),
+                         answer("apoe4", "1", source="derived"))
         self.assertEqual(len(rows), 1)
 
     def test_undocumented_answers_are_skipped(self) -> None:
@@ -132,7 +160,7 @@ class TestSkipping(ActsTestBase):
     def test_note_evidence_survives_alongside_omop_evidence(self) -> None:
         rows = self.read(answer("pack_year", 30, evidence=[
             {"source": "omop", "table": "observation", "row_id": 5},
-            {"source": "note", "span_offsets": [5, 9], "verbatim_quote": "30 pack"},
+            {"source": "note", "note_id": NOTE, "span_offsets": [5, 9], "verbatim_quote": "30 pack"},
         ]))
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["value"]["as_number"], 30.0)
@@ -142,8 +170,8 @@ class TestEvidenceHandling(ActsTestBase):
     def test_one_record_per_evidence_span(self) -> None:
         """NOTE_NLP is one row per span, so two citations are two records."""
         rows = self.read(answer("mmse_score", 22, evidence=[
-            {"source": "note", "span_offsets": [10, 20], "verbatim_quote": "a"},
-            {"source": "note", "span_offsets": [50, 60], "verbatim_quote": "b"},
+            {"source": "note", "note_id": NOTE, "span_offsets": [10, 20], "verbatim_quote": "a"},
+            {"source": "note", "note_id": NOTE, "span_offsets": [50, 60], "verbatim_quote": "b"},
         ]))
         self.assertEqual(len(rows), 2)
         self.assertNotEqual(rows[0]["record_id"], rows[1]["record_id"])
@@ -155,8 +183,15 @@ class TestEvidenceHandling(ActsTestBase):
 
     def test_missing_span_is_an_error_not_a_guess(self) -> None:
         with self.assertRaises(ActsFormatError) as ctx:
-            self.read(answer("mmse_score", 22, evidence=[{"source": "note"}]))
+            self.read(answer("mmse_score", 22,
+                             evidence=[{"source": "note", "note_id": NOTE}]))
         self.assertIn("span_offsets", str(ctx.exception))
+
+    def test_missing_note_id_is_an_error(self) -> None:
+        with self.assertRaises(ActsFormatError) as ctx:
+            self.read(answer("mmse_score", 22,
+                             evidence=[{"source": "note", "span_offsets": [1, 2]}]))
+        self.assertIn("note_id", str(ctx.exception))
 
     def test_quote_becomes_the_lexical_variant(self) -> None:
         (r,) = self.read(answer("mmse_score", 22))
@@ -224,8 +259,8 @@ class TestNormalizerIntegration(ActsTestBase):
     def test_each_field_is_resolved_once_however_many_answers(self) -> None:
         norm = FakeNormalizer({"mmse_score": 4169175})
         self.write(answer("mmse_score", 22, evidence=[
-            {"source": "note", "span_offsets": [1, 2], "verbatim_quote": "a"},
-            {"source": "note", "span_offsets": [3, 4], "verbatim_quote": "b"},
+            {"source": "note", "note_id": NOTE, "span_offsets": [1, 2], "verbatim_quote": "a"},
+            {"source": "note", "note_id": NOTE, "span_offsets": [3, 4], "verbatim_quote": "b"},
         ]))
         build_acts_records(Path(self.tmp.name) / "acts", normalizer=norm)
         self.assertEqual(len(set(norm.calls)), 1)
@@ -251,8 +286,8 @@ class TestNormalizerIntegration(ActsTestBase):
         norm = FakeNormalizer({})
         _, warnings = build_acts_records(
             self.write(answer("mmse_score", 22, evidence=[
-                {"source": "note", "span_offsets": [1, 2], "verbatim_quote": "a"},
-                {"source": "note", "span_offsets": [3, 4], "verbatim_quote": "b"},
+                {"source": "note", "note_id": NOTE, "span_offsets": [1, 2], "verbatim_quote": "a"},
+                {"source": "note", "note_id": NOTE, "span_offsets": [3, 4], "verbatim_quote": "b"},
             ])),
             normalizer=norm,
         )
@@ -361,3 +396,107 @@ class TestValueAndUnitConcepts(ActsTestBase):
             self.write(answer("smoking_status", "former")), normalizer=norm
         )
         self.assertIsNone(records[0].value.unit_concept_id)
+
+
+class TestRealFormatSpecifics(ActsTestBase):
+    """Behaviours measured from real files (docs/ACTS_OUTPUT_FORMAT.md)."""
+
+    def test_derived_source_marks_a_computed_field(self) -> None:
+        """The data says which fields are computed; trust it over a hardcoded list."""
+        rows = self.read(answer("some_future_field", "x", source="derived"))
+        self.assertEqual(rows, [])
+
+    def test_pending_assessments_are_not_loaded(self) -> None:
+        """A pending answer has not been decided yet."""
+        self.assertEqual(self.read(answer("mmse_score", 22, status="pending")), [])
+
+    def test_not_applicable_assessments_are_not_loaded(self) -> None:
+        self.assertEqual(
+            self.read(answer("pack_year", 30, status="not_applicable")), []
+        )
+
+    def test_null_answer_is_skipped_and_never_becomes_zero(self) -> None:
+        """The rubric is explicit that 0 is a real, severe score."""
+        self.assertEqual(self.read(answer("moca_score", None)), [])
+
+    def test_cdr_global_keeps_its_half_point(self) -> None:
+        """It arrives as the string "0.5"; int() would silently lose it."""
+        (r,) = self.read(answer("cdr_global", "0.5"))
+        self.assertEqual(r["value"]["as_number"], 0.5)
+
+    def test_string_booleans_from_the_real_format(self) -> None:
+        (neg,) = self.read(answer("impaired_cognition", "0"))
+        (pos,) = self.read(answer("impaired_cognition", "1"))
+        self.assertFalse(neg["term_exists"])
+        self.assertTrue(pos["term_exists"])
+
+    def test_patient_id_is_carried_as_a_string(self) -> None:
+        (r,) = self.read(answer("mmse_score", 22))
+        self.assertEqual(r["person_id"], PATIENT)
+
+    def test_note_id_is_the_filename_string(self) -> None:
+        (r,) = self.read(answer("mmse_score", 22))
+        self.assertEqual(r["note_id"], NOTE)
+
+    def test_confidence_falls_back_to_the_agent_snapshot(self) -> None:
+        """Reviewer assessments drop confidence; the agent's value survives there."""
+        (r,) = self.read(answer(
+            "mmse_score", 22,
+            original_agent_snapshot={"answer": 22, "confidence": "medium",
+                                     "captured_at": "x", "captured_from_version": 1,
+                                     "evidence": []},
+        ))
+        self.assertEqual(r["concept_confidence"], 0.7)
+
+    def test_uncited_answer_is_flagged_not_loaded(self) -> None:
+        """856/921 assessments have no citation — no note means no date."""
+        (r,) = self.read(answer("education_years", 16, evidence=[]))
+        self.assertTrue(r["_uncited"])
+
+    def test_omop_only_evidence_is_dropped_entirely(self) -> None:
+        """Different from uncited: the fact is already in the CDM."""
+        rows = self.read(answer("pack_year", 30, evidence=[
+            {"source": "omop", "table": "observation", "row_id": 5}
+        ]))
+        self.assertEqual(rows, [])
+
+
+class TestEntityLists(ActsTestBase):
+    def test_empty_list_is_affirmatively_none_not_missing(self) -> None:
+        """[] means NKDA; null means nobody looked. Collapsing them invents data."""
+        (r,) = self.read(answer("allergen", []))
+        self.assertFalse(r["term_exists"])
+        self.assertIn("affirmatively none", r["term_modifiers"])
+
+    def test_each_element_is_normalized_by_its_substance(self) -> None:
+        """OMOP puts the substance in the concept, so the substance needs one."""
+        rows = self.read(answer("allergen", [
+            {"Allergen": "Celexa", "Supporting_Evidence": "…", "Category": "medication"},
+        ]))
+        self.assertEqual(rows[0]["source_term"], "allergen.Celexa")
+        self.assertEqual(rows[0]["lexical_variant"], "Celexa")
+
+    def test_resolved_allergy_is_not_asserted_as_current(self) -> None:
+        rows = self.read(answer("allergen", [
+            {"Allergen": "Sulfa", "Supporting_Evidence": "…", "Clinical_Status": "resolved"},
+        ]))
+        self.assertFalse(rows[0]["term_exists"])
+
+    def test_refuted_allergy_is_not_a_fact(self) -> None:
+        rows = self.read(answer("allergen", [
+            {"Allergen": "X", "Supporting_Evidence": "…", "Verification_Status": "refuted"},
+        ]))
+        self.assertFalse(rows[0]["term_exists"])
+
+    def test_attributes_are_preserved_in_modifiers(self) -> None:
+        rows = self.read(answer("allergen", [
+            {"Allergen": "Celexa", "Supporting_Evidence": "…", "Severity": "severe",
+             "Reaction": "Swelling Pharyngeal"},
+        ]))
+        self.assertIn("severity=severe", rows[0]["term_modifiers"])
+        self.assertIn("Swelling", rows[0]["term_modifiers"])
+
+    def test_element_without_the_substance_key_is_an_error(self) -> None:
+        with self.assertRaises(ActsFormatError) as ctx:
+            self.read(answer("allergen", [{"Supporting_Evidence": "…"}]))
+        self.assertIn("Allergen", str(ctx.exception))

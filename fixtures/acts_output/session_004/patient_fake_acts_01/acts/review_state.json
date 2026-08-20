@@ -1,0 +1,80 @@
+{
+  "schema_version": "1",
+  "patient_id": "patient_fake_acts_01",
+  "task_id": "acts",
+  "task_version": "2026-06-23",
+  "review_status": "reviewer_validated",
+  "version": 49,
+  "updated_at": "2026-07-21T14:40:03.232Z",
+  "updated_by": "sneha",
+  "_comment": "Synthetic. Shaped per docs/ACTS_OUTPUT_FORMAT.md.",
+  "field_assessments": [
+    {"field_id": "mmse_score", "answer": 22, "confidence": "high",
+     "rationale": "Documented MMSE.", "source": "agent", "status": "agent_proposed",
+     "updated_at": "2026-07-21T14:39:10.919Z", "updated_by": "agent",
+     "captured_against_schema_hash": "0702d6bbe98b1a8e",
+     "evidence": [{"source": "note", "note_id": "2025-03-14__memory_clinic_md_op_progress_note.txt",
+                   "span_offsets": [130, 140], "verbatim_quote": "MMSE 22/30",
+                   "doc_type": "memory clinic md op progress note", "author_role": "attending physician"}]},
+
+    {"field_id": "mmse_severity", "answer": "mild", "source": "derived", "status": "approved",
+     "rationale": "computed", "updated_at": "x", "updated_by": "system",
+     "captured_against_schema_hash": "h", "evidence": []},
+
+    {"field_id": "cdr_global", "answer": "0.5", "source": "reviewer", "status": "approved",
+     "rationale": "CDR documented.", "updated_at": "x", "updated_by": "sneha",
+     "captured_against_schema_hash": "h",
+     "evidence": [{"source": "note", "note_id": "2025-03-14__memory_clinic_md_op_progress_note.txt",
+                   "span_offsets": [150, 160], "verbatim_quote": "CDR 0.5",
+                   "doc_type": "memory clinic md op progress note", "author_role": "attending physician"}]},
+
+    {"field_id": "impaired_cognition", "answer": "0", "source": "reviewer", "status": "approved",
+     "rationale": "Cognition documented normal.", "updated_at": "x", "updated_by": "sneha",
+     "captured_against_schema_hash": "h",
+     "evidence": [{"source": "note", "note_id": "2025-03-14__memory_clinic_md_op_progress_note.txt",
+                   "span_offsets": [247, 255], "verbatim_quote": "dementia",
+                   "doc_type": "memory clinic md op progress note", "author_role": "attending physician"}]},
+
+    {"field_id": "smoking_status", "answer": "former", "source": "reviewer", "status": "approved",
+     "rationale": "Ex-smoker.", "updated_at": "x", "updated_by": "sneha",
+     "captured_against_schema_hash": "h",
+     "original_agent_snapshot": {"answer": "current", "confidence": "medium",
+                                 "captured_at": "x", "captured_from_version": 14, "evidence": []},
+     "evidence": [{"source": "note", "note_id": "2025-03-14__memory_clinic_md_op_progress_note.txt",
+                   "span_offsets": [288, 293], "verbatim_quote": "HbA1c",
+                   "doc_type": "memory clinic md op progress note", "author_role": "attending physician"}]},
+
+    {"field_id": "moca_score", "answer": null, "source": "reviewer", "status": "approved",
+     "rationale": "No MoCA documented.", "updated_at": "x", "updated_by": "sneha",
+     "captured_against_schema_hash": "h", "evidence": []},
+
+    {"field_id": "education_years", "answer": 16, "source": "reviewer", "status": "approved",
+     "rationale": "College graduate.", "updated_at": "x", "updated_by": "sneha",
+     "captured_against_schema_hash": "h", "evidence": []},
+
+    {"field_id": "allergen", "answer": [
+        {"Allergen": "Celexa", "Supporting_Evidence": "Allergies Celexa (Swelling Pharyngeal)",
+         "Category": "medication", "Type": "allergy", "Reaction": "Swelling Pharyngeal",
+         "Severity": "severe", "Clinical_Status": "active", "Verification_Status": "confirmed"},
+        {"Allergen": "Sulfa", "Supporting_Evidence": "Sulfa - rash, resolved",
+         "Category": "medication", "Type": "allergy", "Reaction": "rash",
+         "Severity": "mild", "Clinical_Status": "resolved", "Verification_Status": "confirmed"}
+      ],
+     "source": "reviewer", "status": "approved", "rationale": "Allergy list.",
+     "updated_at": "x", "updated_by": "sneha", "captured_against_schema_hash": "h",
+     "evidence": [{"source": "note", "note_id": "2025-03-14__memory_clinic_md_op_progress_note.txt",
+                   "span_offsets": [366, 375], "verbatim_quote": "donepezil",
+                   "doc_type": "memory clinic md op progress note", "author_role": "attending physician"}]},
+
+    {"field_id": "vaccine_name", "answer": [], "source": "reviewer", "status": "approved",
+     "rationale": "No vaccines documented.", "updated_at": "x", "updated_by": "sneha",
+     "captured_against_schema_hash": "h",
+     "evidence": [{"source": "note", "note_id": "2025-03-14__memory_clinic_md_op_progress_note.txt",
+                   "span_offsets": [1, 10], "verbatim_quote": "SYNTHETIC",
+                   "doc_type": "memory clinic md op progress note", "author_role": "attending physician"}]},
+
+    {"field_id": "npi_total", "answer": 12, "source": "reviewer", "status": "pending",
+     "rationale": "not yet decided", "updated_at": "x", "updated_by": "sneha",
+     "captured_against_schema_hash": "h", "evidence": []}
+  ]
+}

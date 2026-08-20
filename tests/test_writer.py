@@ -378,7 +378,7 @@ class TestExecuteAndIdempotency(WriterTestBase):
                     w.conn.execute(f"SELECT COUNT(*) c FROM {table}").fetchone()["c"], 0
                 )
             # The notes themselves must survive an unload.
-            self.assertEqual(w.conn.execute("SELECT COUNT(*) c FROM note").fetchone()["c"], 3)
+            self.assertEqual(w.conn.execute("SELECT COUNT(*) c FROM note").fetchone()["c"], 4)
 
 
 class TestAdapterJoin(unittest.TestCase):

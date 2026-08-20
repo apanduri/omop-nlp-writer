@@ -28,39 +28,53 @@ def build_acts_records(
     records: list[ExtractionRecord] = []
     seen_terms: dict[str, str] = {}
 
+    uncited: dict[str, int] = {}
+    unvalidated: set[str] = set()
+
     for partial in acts.read_answers(acts_path):
-        term = partial.pop("source_term")
         field_id = partial.pop("acts_field_id")
         raw_answer = partial.pop("raw_answer", None)
+        review_status = partial.pop("review_status", "") or ""
+        partial.pop("doc_type", None)
+        partial.pop("author_role", None)
+
+        # An answer with no citation has no note and therefore no date. It cannot
+        # be attached to anything, so it is counted and reported rather than
+        # invented. Measured at 856/921 assessments in the real corpus, so this is
+        # the common case, not an edge case.
+        if partial.pop("_uncited", False):
+            detail = partial.pop("_detail", "")
+            key = f"{field_id}{detail}"
+            uncited[key] = uncited.get(key, 0) + 1
+            continue
+
+        if review_status in acts.UNVALIDATED_REVIEW_STATUS:
+            unvalidated.add(review_status)
+
+        term = partial.pop("source_term")
 
         if normalizer is None:
             if term not in seen_terms:
                 seen_terms[term] = "no-normalizer"
                 warnings.append(f"{field_id}: no normalizer available — evidence only")
         else:
-            # 1. the FIELD -> the event concept
+            # 1. the FIELD (or, for entity lists, the substance) -> event concept
             resolved = normalizer.resolve(term)
             partial["concept_id"] = resolved.concept_id
             if resolved.concept_id is None and term not in seen_terms:
-                # Report once per field, not once per answer: a 29-field rubric
-                # over many notes would otherwise bury the signal.
                 seen_terms[term] = resolved.status
                 if resolved.is_reviewed_nonmapping:
                     warnings.append(
-                        f"{field_id}: reviewed as having no suitable concept "
+                        f"{term}: reviewed as having no suitable concept "
                         f"({resolved.detail}) — evidence only, by decision"
                     )
                 else:
                     warnings.append(
-                        f"{field_id}: not resolved ({resolved.status}: "
+                        f"{term}: not resolved ({resolved.status}: "
                         f"{resolved.detail}) — evidence only"
                     )
 
-            # 2. the ANSWER -> a value concept. OMOP represents categorical values
-            # as concepts too, so a value that normalizes gets value_as_concept_id
-            # and not merely a string. The string stays as value_source_value, which
-            # is what that column is for. Without this a query cannot filter on the
-            # value at all.
+            # 2. the ANSWER -> a value concept, so a query can filter on it
             if partial["value"].get("as_string") is not None and raw_answer is not None:
                 value_res = normalizer.resolve_value(field_id, raw_answer)
                 if value_res.concept_id is not None:
@@ -75,7 +89,7 @@ def build_acts_records(
                             f"query cannot filter on the value"
                         )
 
-            # 3. the UNIT -> a unit concept, wherever OMOP has one.
+            # 3. the UNIT -> a unit concept, wherever OMOP has one
             if partial["value"].get("as_number") is not None:
                 unit_res = normalizer.resolve_unit(field_id)
                 if unit_res.concept_id is not None:
@@ -83,6 +97,17 @@ def build_acts_records(
 
         partial["record_id"] = f"{partial['record_id']}:{partial.get('concept_id') or 0}"
         records.append(ExtractionRecord.from_dict(partial))
+
+    for key, n in sorted(uncited.items(), key=lambda kv: -kv[1]):
+        warnings.append(
+            f"{key}: answered but with no citation ({n}x) — no note means no date, "
+            f"so nothing to attach the fact to; not loaded"
+        )
+    for status in sorted(unvalidated):
+        warnings.append(
+            f"loaded from a file with review_status={status!r} — these answers are "
+            f"not reviewer-validated and can still change"
+        )
 
     return records, warnings
 

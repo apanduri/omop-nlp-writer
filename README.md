@@ -21,7 +21,7 @@ infrastructure and no dependencies.
 
 ```bash
 make demo      # fixtures -> vocab -> CDM -> records -> dry-run -> load -> verify
-make test      # 62 tests
+make test      # 87 tests
 ```
 
 Or step by step:
@@ -184,6 +184,15 @@ OHDSI tooling would run. A Postgres CDM never hits this.
 
 ## ACTS: rubric output
 
+Format contract: [docs/ACTS_OUTPUT_FORMAT.md](docs/ACTS_OUTPUT_FORMAT.md) — measured
+over 42 real review files and 921 assessments, with synthetic examples only. The
+adapter is written against that, not against the criteria docs.
+
+Input is `review_state.json`, one file per **(session × patient × task)** — not per
+note. Ids are strings: a patient slug and a note *filename*, both resolved through
+`*_source_value`.
+
+
 ACTS answers 29 typed questions per patient rather than tagging spans, so the
 concept comes from the **field** and the value from the **answer**:
 
@@ -205,14 +214,22 @@ The answer's **type** decides which value column it lands in, and each type is
 handled explicitly rather than generically, because the generic version fails in
 ways nothing would report:
 
-| Answer type | Goes to | Why it needs care |
+| Answer | Goes to | Why it needs care |
 |---|---|---|
-| score (`mmse_score: 22`) | `value_as_number` | |
-| numeric enum (`cdr_global: 0.5`) | `value_as_number` | it is a score, not a label |
-| boolean (`impaired_cognition: 0`) | **no domain row** | `0` means NOT impaired — recording it as a fact would fabricate a diagnosis |
-| category (`smoking_status: former`) | `value_as_string` | needs an answer-level concept for `value_as_concept_id`; carried visibly until then |
-| date (`lmp_date: "around 1998"`) | `value_as_string` | OMOP has no date-valued column — modelling decision pending |
-| list (`allergen: [...]`) | `value_as_string` | each element needs its own concept |
+| score (`mmse_score: 22`) | `value_as_number` + `unit_concept_id` where a unit exists | |
+| `cdr_global: "0.5"` | `value_as_number` | arrives as a **string**; `int()` silently loses the half point |
+| `impaired_cognition: "0"` | **no domain row** | `"0"` means NOT impaired — recording it as a fact would fabricate a diagnosis |
+| `smoking_status: "former"` | `value_as_concept_id` + `value_source_value` | the concept makes it queryable; the text stays auditable |
+| `lmp_date: "two weeks ago"` | `value_as_string` | deliberately free text — OMOP has no date-valued column |
+| `allergen: [{...}]` | **one record per element** | OMOP puts the substance in the concept, so two allergens are two facts |
+| `allergen: []` | **no domain row** | affirmatively none (NKDA) — different from `null` |
+| `answer: null` | skipped | applicable but not documented. **Never** 0 — the rubric says 0 is a real, severe score |
+
+Three more gates from the real data: assessments with `status: pending` or
+`not_applicable` are not loaded; fields marked `source: "derived"` are skipped
+because the platform computed them from another field; and an answer with **no
+citation** is reported rather than loaded — 856 of 921 assessments have none, and
+without a note there is no date to attach the fact to.
 
 Also skipped: the 7 fields the rubric **computes** from another (`mmse_severity`
 from `mmse_score`, `apoe4` from `apoe_genotype`) — inserting both would record the
