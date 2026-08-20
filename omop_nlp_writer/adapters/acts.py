@@ -18,9 +18,14 @@ the interesting part:
     rubric is explicit that 0 is a real, severe score.
   * `[]` on an entity list means "affirmatively none" (NKDA) — a negative
     finding, which is different again from null.
-  * 856 of 921 assessments carry NO citation. Without one there is no note and no
-    date, so the fact cannot be attached to anything; those are reported rather
-    than invented.
+  * Citation coverage is not the flat ~50% the aggregate suggests. Split by kind:
+    scalars cite 89% of the time, while entity lists never populate `evidence[]`
+    (their provenance is `Supporting_Evidence` inside each record) and derived
+    fields cannot cite at all. Only 4 scalar answers in the corpus were uncited.
+  * An uncited answer is still a real clinical fact. `meta.json` carries an
+    `index_date` for every patient, so the fact can be dated and written to a
+    domain table; only the NOTE_NLP evidence row is lost. Losing an evidence row
+    is much better than dropping a finding.
 """
 
 from __future__ import annotations
@@ -81,10 +86,16 @@ class ActsFormatError(ValueError):
     """The input does not look like an ACTS review_state file."""
 
 
-def read_answers(path: Path) -> Iterator[dict[str, Any]]:
+def read_answers(
+    path: Path, patients_root: Path | None = None
+) -> Iterator[dict[str, Any]]:
     """Yield partial ExtractionRecord dicts from review_state / agent_draft files.
 
     One record per (assessment, citation) pair, plus one per entity-list element.
+
+    `patients_root` points at the corpus (`<root>/<patient_id>/meta.json`), which
+    supplies `index_date`. Without it, uncited answers cannot be dated and are
+    reported instead of loaded.
     """
     for file in _json_files(path):
         doc = json.loads(file.read_text())
@@ -101,6 +112,7 @@ def read_answers(path: Path) -> Iterator[dict[str, Any]]:
             raise ActsFormatError(f"{file}: no patient_id")
 
         review_status = doc.get("review_status", "")
+        index_date = _index_date(patients_root, patient_id)
         source_meta = {
             "pipeline": "chart-review-platform",
             # manifest.model is documented as unreliable, so the rubric version is
@@ -152,22 +164,42 @@ def read_answers(path: Path) -> Iterator[dict[str, Any]]:
             entity_key = ENTITY_LIST_FIELDS.get(field_id)
             if entity_key is not None:
                 yield from _entity_records(
-                    file, field_id, entity_key, raw, assessment, citations, common
+                    file, field_id, entity_key, raw, assessment, citations, common,
+                    index_date,
                 )
                 continue
 
+            value, term_exists, note = _typed_value(field_id, raw)
+
             if not citations:
-                # No citation means no note and no date, so the fact cannot be
-                # attached to anything. Reported by the caller, never invented.
+                # No citation, so no NOTE_NLP row is possible. The fact itself is
+                # still real, and index_date dates it — so the finding survives and
+                # only its provenance is weaker.
+                if index_date is None:
+                    yield {
+                        **common,
+                        "_uncited": True,
+                        "acts_field_id": field_id,
+                        "raw_answer": raw,
+                    }
+                    continue
                 yield {
                     **common,
-                    "_uncited": True,
-                    "acts_field_id": field_id,
+                    "record_id": f"acts:{patient_id}:{field_id}:uncited",
+                    "note_id": None,
+                    "span": None,
+                    "lexical_variant": field_id,
+                    "snippet": None,
+                    "start_date": index_date,
+                    "term_exists": term_exists,
+                    "term_modifiers": _modifiers(field_id, raw, assessment, note)
+                                      + ",provenance=uncited_index_date",
+                    "value": value,
                     "raw_answer": raw,
+                    "source_term": field_id,
+                    "acts_field_id": field_id,
                 }
                 continue
-
-            value, term_exists, note = _typed_value(field_id, raw)
             for citation in citations:
                 yield {
                     **common,
@@ -189,6 +221,7 @@ def _entity_records(
     assessment: dict[str, Any],
     citations: list[dict[str, Any]],
     common: dict[str, Any],
+    index_date: str | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Entity lists: one record per element, because the substance is the concept.
 
@@ -243,7 +276,24 @@ def _entity_records(
                 "raw_answer": substance,
             }
             if citation is None:
-                yield {**record, "_uncited": True, "_detail": f"{substance!r}"}
+                if index_date is None:
+                    yield {**record, "_uncited": True, "_detail": f".{substance}"}
+                    continue
+                yield {
+                    **record,
+                    "record_id": f"acts:{common['person_id']}:{field_id}:{substance}",
+                    "note_id": None,
+                    "span": None,
+                    "lexical_variant": str(substance),
+                    # Supporting_Evidence is a verbatim quote (14/14 records) but
+                    # carries no note_id or offsets, so it is the snippet and not a
+                    # citation.
+                    "snippet": supporting,
+                    "start_date": index_date,
+                    "term_exists": _entity_exists(element),
+                    "term_modifiers": modifiers + ",provenance=uncited_index_date",
+                    "value": {},
+                }
                 continue
             yield {
                 **record,
@@ -361,6 +411,23 @@ def _modifiers(field_id: str, raw: Any, assessment: dict[str, Any], note: str) -
     if note:
         parts.append(f"note={note}")
     return ",".join(parts)
+
+
+def _index_date(patients_root: Path | None, patient_id: str) -> str | None:
+    """`index_date` from the patient's meta.json — populated for 30/30 patients.
+
+    This is what lets an uncited answer still be written as a clinical fact.
+    """
+    if patients_root is None:
+        return None
+    meta = patients_root / str(patient_id) / "meta.json"
+    if not meta.exists():
+        return None
+    try:
+        value = json.loads(meta.read_text()).get("index_date")
+    except json.JSONDecodeError:
+        return None
+    return str(value)[:10] if value else None
 
 
 def _json_files(path: Path) -> list[Path]:

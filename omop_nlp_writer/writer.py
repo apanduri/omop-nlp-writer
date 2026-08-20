@@ -32,6 +32,7 @@ class Disposition(str, Enum):
 
     WRITTEN = "written"                    # NOTE_NLP + domain row
     NOTE_NLP_ONLY = "note_nlp_only"        # kept as evidence, no domain row
+    FACT_ONLY = "fact_only"                # domain row, no evidence row (uncited)
     SKIPPED = "skipped"                    # nothing written
 
 
@@ -82,12 +83,20 @@ class LoadReport:
         return [p for p in self.planned if p.disposition is Disposition.NOTE_NLP_ONLY]
 
     @property
+    def fact_only(self) -> list[PlannedWrite]:
+        return [p for p in self.planned if p.disposition is Disposition.FACT_ONLY]
+
+    @property
     def skipped(self) -> list[PlannedWrite]:
         return [p for p in self.planned if p.disposition is Disposition.SKIPPED]
 
     @property
     def note_nlp_rows(self) -> int:
         return len(self.written) + len(self.note_nlp_only)
+
+    @property
+    def domain_rows(self) -> int:
+        return len(self.written) + len(self.fact_only)
 
 
 class CdmNlpWriter:
@@ -146,15 +155,20 @@ class CdmNlpWriter:
                 ),
             )
 
-        note = self._lookup_note(record.note_id)
-        if note is None:
-            return PlannedWrite(
-                record,
-                Disposition.SKIPPED,
-                Reason.NOTE_NOT_FOUND,
-                detail=self._note_not_found_detail(record.note_id),
-            )
-        resolved_note_id = int(note["note_id"])
+        # An uncited answer has no note. Its clinical fact is still real, so only
+        # the evidence row is lost rather than the finding itself.
+        note = None
+        resolved_note_id = None
+        if record.has_evidence:
+            note = self._lookup_note(record.note_id)
+            if note is None:
+                return PlannedWrite(
+                    record,
+                    Disposition.SKIPPED,
+                    Reason.NOTE_NOT_FOUND,
+                    detail=self._note_not_found_detail(record.note_id),
+                )
+            resolved_note_id = int(note["note_id"])
 
         resolved_person_id = self._resolve_person(record.person_id)
         if resolved_person_id is None:
@@ -167,7 +181,7 @@ class CdmNlpWriter:
                     f"the person crosswalk is missing this patient"
                 ),
             )
-        if int(note["person_id"]) != resolved_person_id:
+        if note is not None and int(note["person_id"]) != resolved_person_id:
             return PlannedWrite(
                 record,
                 Disposition.SKIPPED,
@@ -182,13 +196,17 @@ class CdmNlpWriter:
         # of its own — it is patient-level — so the NOTE row is the source of
         # truth rather than something to infer from a filename.
         fallback_date = None
-        try:
-            fallback_date = note["note_date"]
-        except (IndexError, KeyError):
-            pass
+        if note is not None:
+            try:
+                fallback_date = note["note_date"]
+            except (IndexError, KeyError):
+                pass
 
-        note_nlp_id = self._allocate("note_nlp", "note_nlp_id")
-        note_nlp_row = self._build_note_nlp_row(record, note_nlp_id, resolved_note_id)
+        note_nlp_id = None
+        note_nlp_row = None
+        if resolved_note_id is not None:
+            note_nlp_id = self._allocate("note_nlp", "note_nlp_id")
+            note_nlp_row = self._build_note_nlp_row(record, note_nlp_id, resolved_note_id)
 
         # --- decide whether a domain row is also warranted --------------------
         # resolve() follows 'Maps to' when the concept is non-standard, because a
@@ -203,6 +221,13 @@ class CdmNlpWriter:
                 concept_name += f" -> {standard.concept_name}"
 
         def evidence_only(reason: Reason, detail: str | None = None) -> PlannedWrite:
+            if note_nlp_row is None:
+                # No note and no domain row: nothing can be written at all.
+                return PlannedWrite(
+                    record, Disposition.SKIPPED, reason,
+                    detail=(detail or "") + " (and no citation, so not even evidence)",
+                    resolved_person_id=resolved_person_id,
+                )
             return PlannedWrite(
                 record,
                 Disposition.NOTE_NLP_ONLY,
@@ -262,7 +287,7 @@ class CdmNlpWriter:
         domain_row_id = self._allocate(target.table, target.pk)
         return PlannedWrite(
             record,
-            Disposition.WRITTEN,
+            Disposition.WRITTEN if note_nlp_row is not None else Disposition.FACT_ONLY,
             Reason.OK,
             domain_id=domain_id,
             concept_name=concept_name,
@@ -328,7 +353,7 @@ class CdmNlpWriter:
             "note_id": resolved_note_id,
             "section_concept_id": record.section_concept_id,
             "snippet": record.snippet,
-            "offset": record.span.omop_offset,
+            "offset": record.span.omop_offset if record.span else None,
             "lexical_variant": record.lexical_variant,
             # NOTE_NLP keeps the mapping even when we decline to create a domain
             # row, so a rejected mapping is still auditable.
@@ -405,18 +430,21 @@ class CdmNlpWriter:
             for planned in report.planned:
                 if planned.disposition is Disposition.SKIPPED:
                     continue
-                assert planned.note_nlp_row is not None
-                self._insert("note_nlp", planned.note_nlp_row)
-                if planned.disposition is Disposition.WRITTEN:
+                if planned.note_nlp_row is not None:
+                    self._insert("note_nlp", planned.note_nlp_row)
+                if planned.disposition in (Disposition.WRITTEN, Disposition.FACT_ONLY):
                     assert planned.target is not None and planned.domain_row is not None
                     self._insert(planned.target.table, planned.domain_row)
                 self._insert(
                     "nlp_record_ledger",
                     {
                         "record_id": planned.record.record_id,
-                        "note_id": planned.resolved_note_id,
+                        "note_id": planned.resolved_note_id or 0,
                         "source_note_id": str(planned.record.note_id),
-                        "span_offset": planned.record.span.omop_offset,
+                        "span_offset": (
+                            planned.record.span.omop_offset
+                            if planned.record.span else None
+                        ),
                         "lexical_variant": planned.record.lexical_variant,
                         "concept_id": planned.record.concept_id,
                         "domain_id": planned.domain_id,

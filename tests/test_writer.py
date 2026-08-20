@@ -76,10 +76,26 @@ class WriterTestBase(unittest.TestCase):
 class TestContract(unittest.TestCase):
     def test_missing_required_field_is_rejected(self) -> None:
         bad = base_record()
-        del bad["note_id"]
+        del bad["person_id"]
         with self.assertRaises(ContractError) as ctx:
             ExtractionRecord.from_dict(bad)
-        self.assertIn("note_id", str(ctx.exception))
+        self.assertIn("person_id", str(ctx.exception))
+
+    def test_no_note_is_allowed_when_a_date_is_given(self) -> None:
+        """An uncited answer is still a real clinical fact."""
+        record = ExtractionRecord.from_dict(
+            base_record(note_id=None, span=None, start_date="2025-03-14")
+        )
+        self.assertIsNone(record.note_id)
+        self.assertFalse(record.has_evidence)
+
+    def test_no_note_and_no_date_is_rejected(self) -> None:
+        """Without either, there is nothing to attach the fact to."""
+        bad = base_record(note_id=None, note_datetime=None)
+        bad.pop("start_date", None)
+        with self.assertRaises(ContractError) as ctx:
+            ExtractionRecord.from_dict(bad)
+        self.assertIn("start_date is required", str(ctx.exception))
 
     def test_domain_id_in_input_is_ignored_not_trusted(self) -> None:
         """The vocabulary is the only source of truth for domain routing."""
@@ -455,3 +471,57 @@ class TestCli(WriterTestBase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestFactWithoutEvidence(WriterTestBase):
+    """A clinical fact can be written without a NOTE_NLP row.
+
+    Uncited answers have no note, so NOTE_NLP (whose note_id is a foreign key) is
+    impossible — but the finding is real and the domain row is what queries read.
+    Losing the evidence row is much better than losing the fact.
+    """
+
+    def uncited(self, **kw) -> dict:
+        return base_record(note_id=None, span=None, start_date="2025-03-01", **kw)
+
+    def test_domain_row_is_written_without_a_note(self) -> None:
+        planned = self.plan_one(self.uncited())
+        self.assertIs(planned.disposition, Disposition.FACT_ONLY)
+        self.assertIsNotNone(planned.domain_row)
+        self.assertIsNone(planned.note_nlp_row)
+        self.assertEqual(planned.domain_row["observation_concept_id"], 42869861)
+
+    def test_the_fact_is_dated_by_the_records_own_date(self) -> None:
+        planned = self.plan_one(self.uncited())
+        self.assertEqual(planned.domain_row["observation_date"], "2025-03-01")
+
+    def test_provenance_flag_is_still_applied(self) -> None:
+        planned = self.plan_one(self.uncited())
+        self.assertEqual(
+            planned.domain_row["observation_type_concept_id"], NLP_TYPE_CONCEPT_ID
+        )
+
+    def test_uncited_and_unmappable_writes_nothing_at_all(self) -> None:
+        """No note and no concept leaves nothing to write."""
+        planned = self.plan_one(self.uncited(concept_id=None))
+        self.assertIs(planned.disposition, Disposition.SKIPPED)
+        self.assertIn("no citation", planned.detail)
+
+    def test_execute_inserts_the_fact_and_no_evidence_row(self) -> None:
+        with self.writer() as w:
+            w.execute(w.plan([ExtractionRecord.from_dict(self.uncited())]))
+            self.assertEqual(
+                w.conn.execute("SELECT COUNT(*) c FROM observation").fetchone()["c"], 1
+            )
+            self.assertEqual(
+                w.conn.execute("SELECT COUNT(*) c FROM note_nlp").fetchone()["c"], 0
+            )
+
+    def test_uncited_load_is_still_reversible(self) -> None:
+        with self.writer() as w:
+            w.execute(w.plan([ExtractionRecord.from_dict(self.uncited())]))
+        with self.writer() as w:
+            w.unload()
+            self.assertEqual(
+                w.conn.execute("SELECT COUNT(*) c FROM observation").fetchone()["c"], 0
+            )

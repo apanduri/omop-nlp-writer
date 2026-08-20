@@ -17,6 +17,7 @@ from . import acts, chart_review, normalizer
 def build_acts_records(
     acts_path: Path,
     normalizer: object | None = None,
+    patients_root: Path | None = None,
 ) -> tuple[list[ExtractionRecord], list[str]]:
     """ACTS rubric output -> ExtractionRecords, resolving each field's concept.
 
@@ -31,7 +32,7 @@ def build_acts_records(
     uncited: dict[str, int] = {}
     unvalidated: set[str] = set()
 
-    for partial in acts.read_answers(acts_path):
+    for partial in acts.read_answers(acts_path, patients_root=patients_root):
         field_id = partial.pop("acts_field_id")
         raw_answer = partial.pop("raw_answer", None)
         review_status = partial.pop("review_status", "") or ""
@@ -100,8 +101,9 @@ def build_acts_records(
 
     for key, n in sorted(uncited.items(), key=lambda kv: -kv[1]):
         warnings.append(
-            f"{key}: answered but with no citation ({n}x) — no note means no date, "
-            f"so nothing to attach the fact to; not loaded"
+            f"{key}: answered but uncited ({n}x), and no index_date available — "
+            f"pass --patients-root so meta.json can date the fact, otherwise the "
+            f"finding is lost rather than just its evidence row"
         )
     for status in sorted(unvalidated):
         warnings.append(

@@ -21,7 +21,7 @@ infrastructure and no dependencies.
 
 ```bash
 make demo      # fixtures -> vocab -> CDM -> records -> dry-run -> load -> verify
-make test      # 87 tests
+make test      # 101 tests
 ```
 
 Or step by step:
@@ -224,6 +224,15 @@ ways nothing would report:
 | `allergen: [{...}]` | **one record per element** | OMOP puts the substance in the concept, so two allergens are two facts |
 | `allergen: []` | **no domain row** | affirmatively none (NKDA) — different from `null` |
 | `answer: null` | skipped | applicable but not documented. **Never** 0 — the rubric says 0 is a real, severe score |
+
+**Uncited answers become facts, not losses.** Citation coverage is not the flat
+~50% the aggregate suggests: scalars cite **89%** of the time, entity lists never
+populate `evidence[]` at all (their quote is `Supporting_Evidence` inside each
+record), and derived fields cannot cite. An uncited answer has no note, so no
+NOTE_NLP row is possible — but `meta.json` carries an `index_date` per patient, so
+the clinical fact is still written and dated. Pass `--patients-root` to enable it.
+Losing an evidence row beats losing a finding; in the measured corpus that is 72 of
+127 answers.
 
 Three more gates from the real data: assessments with `status: pending` or
 `not_applicable` are not loaded; fields marked `source: "derived"` are skipped

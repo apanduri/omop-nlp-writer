@@ -81,9 +81,12 @@ class ExtractionRecord:
     #         PERSON.person_source_value.  The chart-review platform emits string
     #         note ids like "2024-12-04__pathology_report", so both are accepted.
     #         Types are honoured as given: "1001" is a source value, 1001 is a key.
-    note_id: int | str
+    # None is allowed: an answer with no citation still describes a real clinical
+    # fact, and can be written to a domain table as long as it has a person and a
+    # date. Only the NOTE_NLP evidence row strictly needs a note.
+    note_id: int | str | None
     person_id: int | str
-    span: Span
+    span: Span | None
     lexical_variant: str
     source: Source
     snippet: str | None = None
@@ -107,15 +110,27 @@ class ExtractionRecord:
     def from_dict(cls, data: dict[str, Any]) -> ExtractionRecord:
         missing = [
             k
-            for k in ("record_id", "note_id", "person_id", "span", "lexical_variant", "source")
+            for k in ("record_id", "person_id", "lexical_variant", "source")
             if data.get(k) is None
         ]
         if missing:
             raise ContractError(f"record missing required field(s): {', '.join(missing)}")
 
-        span_raw = data["span"]
-        if not isinstance(span_raw, dict) or "start" not in span_raw or "end" not in span_raw:
-            raise ContractError(f"{data['record_id']}: span must be {{start, end}}")
+        # A record with no note must carry its own date, or there is nothing to
+        # date the clinical fact with and nothing to attach it to.
+        if data.get("note_id") is None and not (
+            data.get("start_date") or data.get("note_datetime")
+        ):
+            raise ContractError(
+                f"{data['record_id']}: no note_id, so a start_date is required — "
+                f"otherwise the fact has neither a note nor a date"
+            )
+
+        span_raw = data.get("span")
+        if span_raw is not None and (
+            not isinstance(span_raw, dict) or "start" not in span_raw or "end" not in span_raw
+        ):
+            raise ContractError(f"{data['record_id']}: span must be {{start, end}} or absent")
 
         src_raw = data["source"]
         if isinstance(src_raw, str):
@@ -152,9 +167,15 @@ class ExtractionRecord:
 
         return cls(
             record_id=str(data["record_id"]),
-            note_id=_reference(data["note_id"], data["record_id"], "note_id"),
+            note_id=(
+                None if data.get("note_id") is None
+                else _reference(data["note_id"], data["record_id"], "note_id")
+            ),
             person_id=_reference(data["person_id"], data["record_id"], "person_id"),
-            span=Span(int(span_raw["start"]), int(span_raw["end"])),
+            span=(
+                None if span_raw is None
+                else Span(int(span_raw["start"]), int(span_raw["end"]))
+            ),
             lexical_variant=str(data["lexical_variant"]),
             source=src,
             snippet=data.get("snippet"),
@@ -176,6 +197,16 @@ class ExtractionRecord:
             start_date=data.get("start_date"),
             evidence_source=data.get("evidence_source"),
         )
+
+    @property
+    def has_evidence(self) -> bool:
+        """Whether this record can produce a NOTE_NLP row.
+
+        An uncited answer cannot: NOTE_NLP.note_id is a foreign key. The clinical
+        fact is still writable, so the fact is kept and only the evidence row is
+        lost — which is much better than dropping the finding.
+        """
+        return self.note_id is not None
 
     @property
     def is_note_derived(self) -> bool:

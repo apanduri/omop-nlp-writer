@@ -500,3 +500,62 @@ class TestEntityLists(ActsTestBase):
         with self.assertRaises(ActsFormatError) as ctx:
             self.read(answer("allergen", [{"Supporting_Evidence": "…"}]))
         self.assertIn("Allergen", str(ctx.exception))
+
+
+class TestUncitedAnswersBecomeFacts(ActsTestBase):
+    """An uncited answer is a real finding; only its evidence row is unavailable.
+
+    Measured: scalars cite 89% of the time, but entity lists never populate
+    evidence[] at all. Dropping them would lose 72 of 127 answers in the corpus.
+    """
+
+    INDEX_DATE = "2025-03-01"
+
+    def corpus(self) -> Path:
+        root = Path(self.tmp.name) / "patients"
+        (root / PATIENT).mkdir(parents=True, exist_ok=True)
+        (root / PATIENT / "meta.json").write_text(json.dumps({
+            "patient_id": PATIENT, "category": "synthetic",
+            "index_date": self.INDEX_DATE, "phi": False,
+        }))
+        return root
+
+    def read_with_corpus(self, *answers: dict) -> list[dict]:
+        p = Path(self.tmp.name) / "acts.json"
+        p.write_text(json.dumps(doc(*answers)))
+        return list(acts.read_answers(p, patients_root=self.corpus()))
+
+    def test_uncited_scalar_is_dated_by_index_date(self) -> None:
+        (r,) = self.read_with_corpus(answer("education_years", 16, evidence=[]))
+        self.assertIsNone(r["note_id"])
+        self.assertIsNone(r["span"])
+        self.assertEqual(r["start_date"], self.INDEX_DATE)
+        self.assertEqual(r["value"]["as_number"], 16.0)
+
+    def test_uncited_provenance_is_recorded_as_weaker(self) -> None:
+        (r,) = self.read_with_corpus(answer("education_years", 16, evidence=[]))
+        self.assertIn("provenance=uncited_index_date", r["term_modifiers"])
+
+    def test_uncited_negative_stays_negative(self) -> None:
+        (r,) = self.read_with_corpus(answer("impaired_cognition", "0", evidence=[]))
+        self.assertFalse(r["term_exists"])
+
+    def test_without_a_corpus_the_answer_cannot_be_dated(self) -> None:
+        """No index_date means no date, so it is reported rather than invented."""
+        (r,) = self.read(answer("education_years", 16, evidence=[]))
+        self.assertTrue(r["_uncited"])
+
+    def test_entity_record_uses_supporting_evidence_as_the_quote(self) -> None:
+        """Entity lists never populate evidence[]; the quote lives in the record."""
+        rows = self.read_with_corpus(answer("allergen", [
+            {"Allergen": "Celexa", "Supporting_Evidence": "Allergies Celexa (Swelling)"},
+        ], evidence=[]))
+        self.assertEqual(rows[0]["snippet"], "Allergies Celexa (Swelling)")
+        self.assertIsNone(rows[0]["note_id"])
+        self.assertEqual(rows[0]["start_date"], self.INDEX_DATE)
+
+    def test_a_cited_answer_still_prefers_the_citation(self) -> None:
+        """index_date is a fallback, not a replacement."""
+        (r,) = self.read_with_corpus(answer("mmse_score", 22))
+        self.assertEqual(r["note_id"], NOTE)
+        self.assertIsNotNone(r["span"])

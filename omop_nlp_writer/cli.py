@@ -179,7 +179,9 @@ def cmd_load(args: argparse.Namespace) -> int:
     if args.acts:
         client = _normalizer(args)
         try:
-            records, warnings = build_acts_records(args.acts, normalizer=client)
+            records, warnings = build_acts_records(
+                args.acts, normalizer=client, patients_root=args.patients_root
+            )
         finally:
             if client:
                 client.close()
@@ -312,12 +314,17 @@ def _print_report(report: LoadReport, *, dry_run: bool) -> None:
         icon = {
             Disposition.WRITTEN: "OK  ",
             Disposition.NOTE_NLP_ONLY: "NLP ",
+            Disposition.FACT_ONLY: "FACT",
             Disposition.SKIPPED: "SKIP",
         }[planned.disposition]
-        note_ref = str(r.note_id)
-        if planned.resolved_note_id is not None and not isinstance(r.note_id, int):
-            note_ref += f" -> NOTE#{planned.resolved_note_id}"
-        head = f"{icon} note {note_ref} @{r.span.omop_offset:<10} {r.lexical_variant!r}"
+        if r.note_id is None:
+            head = f"{icon} (uncited)  {'':<12} {r.lexical_variant!r}"
+        else:
+            note_ref = str(r.note_id)
+            if planned.resolved_note_id is not None and not isinstance(r.note_id, int):
+                note_ref += f" -> NOTE#{planned.resolved_note_id}"
+            offset = r.span.omop_offset if r.span else "-"
+            head = f"{icon} note {note_ref} @{offset:<10} {r.lexical_variant!r}"
         print(f"\n{head}")
         if planned.disposition is Disposition.SKIPPED:
             print(f"      skipped: {planned.reason.value}"
@@ -344,9 +351,10 @@ def _print_report(report: LoadReport, *, dry_run: bool) -> None:
             print(f"        {col:<32} = {val}{marker}")
 
     print(f"\n{'-' * 78}")
-    print(f"{verb}: {report.note_nlp_rows} NOTE_NLP rows, {len(report.written)} domain rows")
-    print(f"  domain rows written      : {len(report.written)}")
-    print(f"  NOTE_NLP only (evidence) : {len(report.note_nlp_only)}")
+    print(f"{verb}: {report.note_nlp_rows} NOTE_NLP rows, {report.domain_rows} domain rows")
+    print(f"  evidence + fact          : {len(report.written)}")
+    print(f"  fact only (uncited)      : {len(report.fact_only)}")
+    print(f"  evidence only            : {len(report.note_nlp_only)}")
     print(f"  skipped entirely         : {len(report.skipped)}")
     by_reason: dict[str, int] = {}
     for p in report.planned:
@@ -397,6 +405,10 @@ def build_parser() -> argparse.ArgumentParser:
     ld.add_argument("--acts", type=Path, nargs="?", const=DEFAULT_ACTS,
                     help="ACTS rubric output (field/value answers); resolves each "
                          "field's concept through concept-normalizer")
+    ld.add_argument("--patients-root", type=Path,
+                    help="corpus root (<root>/<patient_id>/meta.json), which "
+                         "supplies index_date so uncited answers can still be "
+                         "written as clinical facts")
     ld.add_argument("--target", default="OMOP",
                     help="target vocabulary passed to the normalizer")
     ld.add_argument("--alias-table", default="acts",

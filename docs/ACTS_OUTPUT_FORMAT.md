@@ -437,7 +437,169 @@ draft is empty — read the assessments.
 
 ---
 
-## 11. Offer
+## 11. Citation coverage — measured
+
+Same corpus: 42 files, 921 assessments, 127 of them with a non-null answer.
+
+```
+non-null answers        127
+  with >=1 citation      33   (26.0%)
+  with NO citation       94   (74.0%)
+```
+
+**But the aggregate is the wrong number to plan against.** Split by field kind:
+
+| kind | answered | cited | coverage |
+|---|---|---|---|
+| **scalar** | 37 | 33 | **89.2%** |
+| entity-list (`allergen`, `vaccine_name`) | 72 | 0 | 0% |
+| derived (`apoe2/3/4`, `*_severity`, `vaccine_category`) | 18 | 0 | 0% |
+
+So it isn't "half of answers lack provenance". Scalars cite **89%** of the time,
+and the whole gap is two categories that are structurally different:
+
+- **Derived fields (18)** — computed from other fields. They cannot cite, and
+  you were going to recompute them anyway (§7).
+- **Entity lists (72)** — these never populate `evidence[]`. Their provenance
+  lives **inside the answer**: every record carries `Supporting_Evidence`, and
+  **14 of 14 records have it (100%)**. The remaining answers are `[]`
+  (affirmatively none documented / NKDA), which have nothing to cite.
+
+Answered-but-uncited, by field:
+
+```
+allergen        36     entity-list — see above
+vaccine_name    36     entity-list
+apoe2/3/4       5 each derived
+cdr_severity    3      derived
+cdr_global      1  postmenopause 1  apoe_genotype 1  gds_stage 1
+```
+
+Only **4 scalar answers** across the whole corpus were answered without a
+citation.
+
+### By source
+
+| source | answered | cited | coverage |
+|---|---|---|---|
+| reviewer | 109 | 33 | 30.3% |
+| derived | 18 | 0 | 0% |
+| agent | 0 | — | — |
+
+No agent-sourced *answers* appear: once a reviewer approves an agent draft the
+assessment becomes `source: "reviewer"` (the agent's version is preserved under
+`original_agent_snapshot`). So this corpus can't measure the agent's own citation
+rate — but two code paths make it effectively 100% for anything an agent answers:
+
+- **Scalars** go through the faithfulness gate at the MCP boundary
+  (`packages/faithfulness` → `verifyEvidence`): a quote not literally present in
+  the note is **rejected**, with offsets auto-corrected when the quote is found
+  but mis-located. An agent answer without verifiable evidence cannot be written.
+- **Entity lists** go through `assertAnswerEntities(field, answer, requireEvidence = true)`
+  in `packages/domain-review/src/review-state.ts:921`, which throws
+  `entity_missing_evidence` on any record lacking `Supporting_Evidence`.
+
+### ⚠ Caveat on the sample
+
+These 127 answers come from a **deliberately sparse** annotation pass — most
+ACTS fields legitimately aren't documented in a chart, and this reviewer's
+answers skew heavily to `null`. A richer run (ours produced ~200 answered fields
+across 20 patients) may shift the mix. Treat 89% scalar coverage as indicative,
+not a guarantee.
+
+---
+
+## 12. Note provenance when there is no citation
+
+**Yes — recoverable, at three levels of precision.**
+
+**1. Patient-level date, always available.** Every patient directory has a
+`meta.json`, and `index_date` is populated for **30/30 patients**:
+
+```
+meta.json keys: patient_id, category, index_date, generated_by, phi
+```
+
+That's enough to write the clinical fact even with no note reference.
+
+**2. The document set, always enumerable.** `<patients_root>/<patient_id>/notes/*.txt`,
+filenames of the form `YYYY-MM-DD__doc_type.txt`. Notes per patient in this
+cohort: 1–6 (`{1:10, 2:9, 3:4, 4:3, 5:1, 6:3}`). So even an uncited answer has a
+known, dated candidate set — often a single note, where attribution is
+unambiguous.
+
+**3. Entity records carry their own snippet.** `Supporting_Evidence` is a
+verbatim quote (14/14 records) but has **no `note_id` and no offsets**. Good for
+a text match against the patient's notes; not a direct key.
+
+Two things that do **not** help:
+
+- `review_state.selected_evidence` — declared in the type, present in **0 of 42**
+  files.
+- **Agent transcripts** (`per_patient/<pid>/agents/agent_1_transcript.jsonl`) log
+  tool calls and would in principle reveal which notes were opened. The one we
+  sampled came from a failed run (2 lines, no tool calls), so **this is
+  plausible but unverified** — don't build on it until confirmed against a
+  successful run.
+
+### Suggested loading strategy
+
+| case | NOTE_NLP evidence row | clinical fact row |
+|---|---|---|
+| scalar with citation (89% of scalars) | `note_id` + offsets + quote | yes |
+| scalar without citation | omit, or attribute to the sole note when the patient has exactly one | yes, dated by `index_date` |
+| entity record | no `note_id`; `Supporting_Evidence` as the quote | yes, dated by `index_date` |
+| `[]` entity answer | none | yes — an affirmative negative (NKDA) |
+| `answer: null` | none | no — absence of assessment, not a finding |
+| derived field | none | recompute rather than load |
+
+That should let you load every clinical fact and lose only the NOTE_NLP rows for
+uncited answers, rather than dropping the facts themselves.
+
+---
+
+## 13. Is citation enforceable in the review UI?
+
+**Not today for reviewers; yes for agents; and the switch already exists.**
+
+The VALIDATE gate (`server/review-routes.ts`, phenotype branch) checks four
+predicates:
+
+```ts
+all_terminal                        // every leaf approved | overridden | not_applicable
+every_leaf_touched_or_bulk_accepted // source === "reviewer" || status === "not_applicable"
+alerts_dismissed                    // no error-severity cross-criterion alerts
+faithfulness_pass = true            // hardcoded — "enforced at write time"
+```
+
+**No evidence requirement.** A reviewer can answer any field with no citation and
+still mark the patient validated. `faithfulness_pass` is a literal `true`,
+because faithfulness is enforced on the *agent's* write path, not the human's.
+
+For entity fields the asymmetry is explicit in the code, with the rationale in a
+comment:
+
+```ts
+// Supporting_Evidence is required of the AGENT (anti-fabrication); a human
+// reviewer adjudicating may enter an entity without pasting a quote.
+if (requireEvidence && (rec.Supporting_Evidence == null || …)) throw …
+```
+
+So `requireEvidence` is a real parameter (`review-state.ts:921`, default `true`).
+
+**Could a required-citation mode exist?** Yes, cheaply — for scalars it's one
+additional predicate in that gate (`every_answered_leaf_has_evidence`), and for
+entity lists it's passing `requireEvidence = true` on the reviewer path. Neither
+is an architectural change. Whether it *should* be on is a methodology call: it
+would slow reviewers down and force a citation for answers a human derives from
+reading the whole chart rather than one span.
+
+If provenance completeness matters to your load, that's worth raising with the
+platform owner as a config flag rather than working around downstream.
+
+---
+
+## 14. Offer
 
 If hand-checking against synthetic fixtures isn't enough, I can run the pipeline
 over the repo's two synthetic ACTS patients and send you the resulting
